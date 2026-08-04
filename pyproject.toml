@@ -1,0 +1,67 @@
+[project]
+name = "automigrate"
+version = "0.1.0"
+description = "Agentic Framework Migration & Validation System"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # --- Orchestration & Agent ---
+    "langgraph>=0.2.0",
+    "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "langchain-community>=0.3.0",
+
+    # --- MCP Server ---
+    "mcp[cli]>=1.0.0",
+
+    # --- AST Transforms ---
+    "ast-grep-py>=0.28.0",
+
+    # --- RAG Pipeline ---
+    "chromadb>=0.5.0",
+    "langchain-chroma>=0.1.0",
+    "sentence-transformers>=3.0.0",
+
+    # --- Secrets Scanning ---
+    # gitleaks is a standalone binary; install separately
+
+    # --- Tracing & Evaluation ---
+    "langsmith>=0.1.0",
+    "ragas>=0.2.0",
+
+    # --- Utilities ---
+    "python-dotenv>=1.0.0",
+    "pydantic>=2.0.0",
+    "rich>=13.0.0",
+    "click>=8.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.6.0",
+]
+
+[project.scripts]
+automigrate = "automigrate.cli:main"
+
+[build-system]
+requires = ["setuptools>=68.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["automigrate*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

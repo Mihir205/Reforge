@@ -1,0 +1,126 @@
+<!-- 
+  EXPECTED OUTPUT after migration.
+  This file represents the correct new Control Flow syntax for every pattern
+  in demo.component.html. Used for automated comparison in Phase 1 verification.
+-->
+
+<!-- Pattern 1: Simple @if -->
+@if (isLoggedIn) {
+  <div>
+    <p>Welcome back!</p>
+  </div>
+}
+
+<!-- Pattern 2: @if with @else -->
+@if (hasPermission) {
+  <div>
+    <h2>Admin Panel</h2>
+    <p>You have full access to the dashboard.</p>
+  </div>
+} @else {
+  <p>Access denied. Please contact your administrator.</p>
+}
+
+<!-- Pattern 3: @if with then/else (both referenced templates inlined) -->
+@if (isLoading) {
+  <div class="spinner">Loading...</div>
+} @else {
+  <div class="content">Data loaded successfully.</div>
+}
+
+<!-- Pattern 4: Simple @for -->
+<ul>
+  @for (item of items; track item) {
+    <li>
+      {{ item.name }} — {{ item.price | currency }}
+    </li>
+  }
+</ul>
+
+<!-- Pattern 5: @for with index and track expression -->
+@for (item of items; track item.id; let i = $index) {
+  <div class="card">
+    <span class="index">{{ i + 1 }}</span>
+    <h3>{{ item.title }}</h3>
+    <p>{{ item.description }}</p>
+  </div>
+}
+
+<!-- Pattern 6: @for with multiple local variables -->
+@for (row of tableData; track row; let i = $index; let isFirst = $first; let isLast = $last; let isEven = $even) {
+  <tr>
+    <td [class.highlight]="isFirst || isLast" [class.even-row]="isEven">
+      {{ i }}: {{ row.value }}
+    </td>
+  </tr>
+}
+
+<!-- Pattern 7: @switch -->
+@switch (status) {
+  @case ('active') {
+    <p class="status-active">Active</p>
+  }
+  @case ('inactive') {
+    <p class="status-inactive">Inactive</p>
+  }
+  @case ('pending') {
+    <p class="status-pending">Pending Review</p>
+  }
+  @default {
+    <p class="status-unknown">Unknown Status</p>
+  }
+}
+
+<!-- Pattern 8: Nested @for + @if -->
+@for (user of users; track user) {
+  @if (user.isActive) {
+    <div class="user-card">
+      <h3>{{ user.name }}</h3>
+      @if (user.isAdmin) {
+        <span class="badge admin">Admin</span>
+      } @else {
+        <span class="badge member">Member</span>
+      }
+    </div>
+  }
+}
+
+<!-- Pattern 9: @if with async pipe (ambiguous — LLM path) -->
+@if (userData$ | async; as user) {
+  <div>
+    <h2>{{ user.displayName }}</h2>
+    <p>Email: {{ user.email }}</p>
+    <ul>
+      @for (role of user.roles; track role) {
+        <li>{{ role }}</li>
+      }
+    </ul>
+  </div>
+}
+
+<!-- Pattern 10: Complex nested — @for + @if + @switch -->
+@for (order of orders; track order.id) {
+  @if (order.items.length > 0) {
+    <div class="order-card">
+      <h3>Order #{{ order.id }}</h3>
+      @switch (order.status) {
+        @case ('shipped') {
+          <span class="badge shipped">Shipped</span>
+        }
+        @case ('delivered') {
+          <span class="badge delivered">Delivered</span>
+        }
+        @default {
+          <span class="badge processing">Processing</span>
+        }
+      }
+      <ul>
+        @for (item of order.items; track item) {
+          <li>
+            {{ item.name }} x{{ item.qty }}
+          </li>
+        }
+      </ul>
+    </div>
+  }
+}

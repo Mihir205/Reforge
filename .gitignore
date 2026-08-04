@@ -1,0 +1,37 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# --- Environment ---
+.env
+
+# --- IDE ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Data / Generated ---
+data/chroma_db/
+reports/*.json
+reports/*.md
+reports/review_tickets/
+
+# --- Node (fixture projects) ---
+node_modules/
+.angular/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+
+# --- Agents ---
+.agents/

@@ -1,0 +1,148 @@
+<!-- 
+  Fixture: Angular template using LEGACY control flow syntax.
+  This file contains all the patterns that AutoMigrate should detect and transform.
+-->
+
+<!-- ==========================================================================
+  Pattern 1: Simple *ngIf
+  Expected: @if (isLoggedIn) { <p>Welcome back!</p> }
+========================================================================== -->
+@if (isLoggedIn">
+  <p>Welcome back!</p>
+</div>
+
+<!-- ==========================================================================
+  Pattern 2: *ngIf with else
+  Expected: @if (hasPermission) { ... } @else { ... }
+========================================================================== -->
+@if (hasPermission) {
+  <div>
+  <h2>Admin Panel</h2>
+  <p>You have full access to the dashboard.</p>
+</div>
+} @else {
+  <p>Access denied. Please contact your administrator.</p>
+}
+<!-- ==========================================================================
+  Pattern 3: *ngIf with then/else
+  Expected: @if (isLoading) { <spinner /> } @else { <content /> }
+========================================================================== -->
+<ng-container *ngIf="isLoading) {
+  <div class="spinner">Loading...</div>
+} @else {
+  <div class="content">Data loaded successfully.</div>
+}
+</ng-template>
+<!-- ==========================================================================
+  Pattern 4: Simple *ngFor
+  Expected: @for (item of items; track item) { ... } @empty { ... }
+========================================================================== -->
+<ul>
+  @for (item of items; track item) {
+  <li>
+    {{ item.name }} — {{ item.price | currency }}
+  </li>
+}
+</ul>
+
+<!-- ==========================================================================
+  Pattern 5: *ngFor with index and trackBy
+  Expected: @for (item of items; track item.id; let i = $index) { ... }
+========================================================================== -->
+@for (item of items; track trackById($index, item); let i = $index) {
+  <div>
+  <span class="index">{{ i + 1 }}</span>
+  <h3>{{ item.title }}</h3>
+  <p>{{ item.description }}</p>
+</div>
+}
+
+<!-- ==========================================================================
+  Pattern 6: *ngFor with multiple local variables
+  Expected: @for (item of items; track item; let i = $index, ...) { ... }
+========================================================================== -->
+@for (row of tableData; track row; let i = $index; let isFirst = $first; let isLast = $last; let isEven = $even) {
+  <tr>
+  <td [class.highlight]="isFirst || isLast" [class.even-row]="isEven">
+    {{ i }}: {{ row.value }}
+  </td>
+</tr>
+}
+
+<!-- ==========================================================================
+  Pattern 7: *ngSwitch
+  Expected: @switch (status) { @case ('active') { ... } @default { ... } }
+========================================================================== -->
+@switch (status) {
+  @case ('active') {
+    <p class="status-active">Active</p>
+  }
+  @case ('inactive') {
+    <p class="status-inactive">Inactive</p>
+  }
+  @case ('pending') {
+    <p class="status-pending">Pending Review</p>
+  }
+  @default {
+    <p class="status-unknown">Unknown Status</p>
+  }
+}
+
+<!-- ==========================================================================
+  Pattern 8: Nested *ngIf inside *ngFor
+  Expected: @for (...) { @if (...) { ... } }
+========================================================================== -->
+@for (user of users; track trackByUserId($index, user)) {
+  <div>
+  <div *ngIf="user.isActive" class="user-card">
+    <h3>{{ user.name }}</h3>
+    <span *ngIf="user.isAdmin" class="badge admin">Admin</span>
+    <span *ngIf="!user.isAdmin" class="badge member">Member</span>
+  </div>
+}
+</div>
+
+<!-- ==========================================================================
+  Pattern 9: *ngIf with async pipe (AMBIGUOUS — may need LLM fallback)
+  Expected: @if (data$ | async; as data) { ... } — syntax TBD
+========================================================================== -->
+<div *ngIf="userData$ | async as user">
+  <h2>{{ user.displayName }}</h2>
+  <p>Email: {{ user.email }}</p>
+  <ul>
+    @for (role of user.roles; track role) {
+  <li>{{ role }}</li>
+}
+  </ul>
+</div>
+
+<!-- ==========================================================================
+  Pattern 10: Complex nested — *ngFor with *ngIf and *ngSwitch
+========================================================================== -->
+@for (order of orders; track trackByOrderId($index, order)) {
+  <div>
+  @if (order.items.length > 0) {
+  <div>
+    <h3>Order #{{ order.id }}</h3>
+    @switch (order.status) {
+  @case ('shipped') {
+    <span class="badge shipped">Shipped</span>
+  }
+  @case ('delivered') {
+    <span class="badge delivered">Delivered</span>
+  }
+  @default {
+    <span class="badge processing">Processing</span>
+  }
+}
+}
+}
+    <ul>
+      @for (item of order.items; track item) {
+  <li>
+        {{ item.name }} x{{ item.qty }}
+      </li>
+}
+    </ul>
+  </div>
+</div>
