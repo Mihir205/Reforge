@@ -1,0 +1,25 @@
+{
+  "run_id": "run_2026_08_24_2230",
+  "timestamp": "2026-08-24T22:30:29.089709",
+  "project": "C:\\Users\\mihir\\AppData\\Local\\Temp\\pytest-of-mihir\\pytest-8\\test_report_and_ticket_generat0\\project4",
+  "migration_type": "angular_control_flow",
+  "files": [
+    {
+      "file": "report_test.html",
+      "strategy": "ambiguous",
+      "confidence_score": 0.0,
+      "validation": {},
+      "retry_count": 0,
+      "failure_category": "unknown",
+      "human_review_required": true,
+      "trace_url": null
+    }
+  ],
+  "summary": {
+    "total_files": 1,
+    "auto_approved": 0,
+    "flagged_for_review": 1,
+    "avg_confidence": 0.0,
+    "time_saved_estimate_hours": 0.0
+  }
+}

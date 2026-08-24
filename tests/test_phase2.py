@@ -31,9 +31,20 @@ class TestAgentOrchestration:
             "migration_type": "angular_control_flow",
             "dry_run": True,
             "max_retries": 3,
+            "run_id": "run_test",
             "file_queue": [FileTask(file_path="test.html")],
+            "current_file": None,
+            "transformed_content": None,
+            "diff": None,
+            "failure_context": {},
+            "retry_counts": {},
+            "confidence_scores": {},
+            "validation_results": {},
+            "test_results": {},
+            "failure_categories": {},
             "completed_files": [],
             "escalated_files": [],
+            "report": None,
         }
         
         # Run graph
@@ -60,9 +71,20 @@ class TestAgentOrchestration:
             "migration_type": "angular_control_flow",
             "dry_run": False,
             "max_retries": 3,
+            "run_id": "run_test",
             "file_queue": [FileTask(file_path="test2.html")],
+            "current_file": None,
+            "transformed_content": None,
+            "diff": None,
+            "failure_context": {},
+            "retry_counts": {},
+            "confidence_scores": {},
+            "validation_results": {},
+            "test_results": {},
+            "failure_categories": {},
             "completed_files": [],
             "escalated_files": [],
+            "report": None,
         }
         
         final_state = app.invoke(initial_state)

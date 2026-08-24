@@ -1,0 +1,31 @@
+{
+  "run_id": "run_2026_08_24_2217",
+  "timestamp": "2026-08-24T22:17:20.985834",
+  "project": "C:\\Users\\mihir\\AppData\\Local\\Temp\\pytest-of-mihir\\pytest-8\\test_live_run_routing0\\project2",
+  "migration_type": "angular_control_flow",
+  "files": [
+    {
+      "file": "test2.html",
+      "strategy": "deterministic",
+      "confidence_score": 100.0,
+      "validation": {
+        "ast": "pass",
+        "type_check": "pass",
+        "lint": "pass",
+        "secrets_scan": "pass",
+        "tests": "pass"
+      },
+      "retry_count": 0,
+      "failure_category": null,
+      "human_review_required": false,
+      "trace_url": null
+    }
+  ],
+  "summary": {
+    "total_files": 1,
+    "auto_approved": 1,
+    "flagged_for_review": 0,
+    "avg_confidence": 100.0,
+    "time_saved_estimate_hours": 0.25
+  }
+}
