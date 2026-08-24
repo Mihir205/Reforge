@@ -7,9 +7,21 @@ Defines the LangGraph state for the AutoMigrate agent.
 from __future__ import annotations
 
 import operator
-from typing import Annotated, TypedDict
+from typing import Annotated, Literal, TypedDict
 
 from pydantic import BaseModel, Field
+
+# Failure categories that the retry classifier uses to route targeted retries.
+FailureCategory = Literal[
+    "syntax_failure",
+    "compilation_failure",
+    "type_error",
+    "lint_error",
+    "secrets_detected",
+    "test_failure",
+    "runtime_failure",
+    "unknown",
+]
 
 
 class ValidationResult(BaseModel):
@@ -68,6 +80,7 @@ class MigrationState(TypedDict):
     migration_type: str
     dry_run: bool
     max_retries: int
+    run_id: str  # Unique per-run ID, e.g. "run_2026_08_24_2209"
     
     # Queue management
     file_queue: list[FileTask]
@@ -76,6 +89,10 @@ class MigrationState(TypedDict):
     # State for the current file
     transformed_content: str | None
     diff: str | None
+
+    # Failure context for targeted retries.
+    # Maps file_path -> human-readable failure summary passed back to LLM.
+    failure_context: Annotated[dict[str, str], reduce_dict]
     
     # Tracking progress and metrics
     # Using Annotated to specify how updates are merged (reducers)
@@ -83,7 +100,7 @@ class MigrationState(TypedDict):
     confidence_scores: Annotated[dict[str, float], reduce_dict]
     validation_results: Annotated[dict[str, ValidationResult], reduce_dict]
     test_results: Annotated[dict[str, TestResult], reduce_dict]
-    failure_categories: Annotated[dict[str, str], reduce_dict]
+    failure_categories: Annotated[dict[str, FailureCategory], reduce_dict]
     
     completed_files: Annotated[list[str], reduce_list]
     escalated_files: Annotated[list[str], reduce_list]

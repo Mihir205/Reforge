@@ -57,7 +57,7 @@ def run_tests_node(state: MigrationState) -> dict:
     return {"test_results": {current_file.file_path: result}}
 
 
-from automigrate.agent.nodes.confidence_calculator import confidence_calc_node
+from automigrate.agent.nodes.confidence_calculator import confidence_calc_node, AUTO_APPROVE_THRESHOLD
 from automigrate.agent.nodes.report_generator import report_generator_node
 
 
@@ -165,10 +165,52 @@ def create_agent_graph() -> StateGraph:
     )
     
     graph.add_edge("run_tests", "confidence_calc")
-    graph.add_edge("confidence_calc", "planner") # Loop back to planner for next file
-    
-    graph.add_edge("record_dry_run", "planner") # Loop back to planner
-    
+
+    # After confidence calc: if approved → loop to planner for next file.
+    # If failed AND retries remain → re-queue file and loop back to planner.
+    # If failed AND retries exhausted → loop to planner which will escalate.
+    def route_after_confidence(s: MigrationState) -> str:
+        curr = s.get("current_file")
+        if not curr:
+            return "planner"
+        score = s.get("confidence_scores", {}).get(curr.file_path, 0.0)
+        if score >= AUTO_APPROVE_THRESHOLD:
+            return "planner"  # File done — planner picks up the next one
+        # Failed: increment retry count and re-add file to queue for retry
+        retries = s.get("retry_counts", {}).get(curr.file_path, 0)
+        max_retries = s.get("max_retries", 3)
+        if retries < max_retries:
+            # Re-insert the file at the front of the queue for immediate retry
+            return "retry_requeue"
+        return "planner"  # Planner will detect budget exhausted and escalate
+
+    def retry_requeue_node(s: MigrationState) -> dict:
+        """Re-insert the current file at the front of the queue with incremented retry count."""
+        curr = s.get("current_file")
+        if not curr:
+            return {}
+        queue = list(s.get("file_queue", []))
+        queue.insert(0, curr)  # Re-queue at front for immediate retry
+        retries = s.get("retry_counts", {}).get(curr.file_path, 0)
+        return {
+            "file_queue": queue,
+            "current_file": None,
+            "retry_counts": {curr.file_path: retries + 1},
+        }
+
+    graph.add_node("retry_requeue", retry_requeue_node)
+    graph.add_conditional_edges(
+        "confidence_calc",
+        route_after_confidence,
+        {
+            "planner": "planner",
+            "retry_requeue": "retry_requeue",
+        }
+    )
+    graph.add_edge("retry_requeue", "planner")
+
+    graph.add_edge("record_dry_run", "planner")  # Loop back to planner
+
     graph.add_edge("report_generator", END)
-    
+
     return graph.compile()

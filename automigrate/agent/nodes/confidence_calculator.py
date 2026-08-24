@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from automigrate.agent.state import MigrationState, ValidationResult
 
-# Thresholds
+# Thresholds — exported so graph.py can use them for routing decisions.
 AUTO_APPROVE_THRESHOLD = 90.0
 QUICK_REVIEW_THRESHOLD = 70.0
 

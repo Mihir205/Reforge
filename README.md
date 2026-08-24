@@ -21,6 +21,7 @@ This project automates that workflow end-to-end using an **agentic AI system**: 
 - Escalate uncertain cases instead of guessing.
 - Keep humans in the loop only where they provide value.
 - Make every agent decision traceable and replayable.
+- The CLI is the user's entry point; MCP is the agent's internal tool interface. They are different layers, not competing designs.
 
 ---
 
@@ -48,8 +49,9 @@ Note: the transform engine underneath (`apply_ast_transform`) is implementation-
 
 | Layer | Technology | Role |
 |---|---|---|
+| User Interface | **CLI** (Python console-script, `pip install`-able) | The human's entry point — the only thing a user runs directly |
 | Orchestration | **LangGraph** | Stateful agent graph — planning, looping, conditional routing, fan-out for parallel work |
-| Tool Interface | **MCP (Model Context Protocol) Server** | Exposes migration primitives as callable tools |
+| Tool Interface | **MCP (Model Context Protocol) Server** | Exposes migration primitives as callable tools — consumed by the agent internally, not by the human |
 | Deterministic Transforms | ast-grep / jscodeshift / ts-morph | Rule-based AST rewriting, engine-agnostic |
 | LLM Reasoning | LangChain + LLM provider | Handles ambiguous transforms, generates fallback code |
 | Grounding | **RAG (retrieval-augmented generation)** | Retrieves current migration docs/release notes so the LLM isn't relying on stale training data |
@@ -64,13 +66,67 @@ Note: the transform engine underneath (`apply_ast_transform`) is implementation-
 
 ---
 
-## 5. Overall Project Workflow
+## 5. System Architecture: CLI vs. MCP Server
+
+A common point of confusion: **CLI and MCP are not two competing ways to expose this project — they are two different layers, serving two different consumers.**
+
+- **CLI = the human's entry point.** A developer installs the package and runs a command in their terminal. This is how *AutoMigrate's user* interacts with the system.
+- **MCP Server = the agent's internal tool-exposure layer.** MCP doesn't talk to humans — it talks to agents/LLM hosts. The LangGraph planner is the thing calling `scan_project`, `apply_ast_transform`, `run_test_suite`, etc. as MCP tools. A human never calls the MCP server directly.
+
+```
+Human runs:  automigrate migrate ./my-project --framework angular --migration control-flow
+        |
+        v
+CLI boots the LangGraph agent
+        |
+        v
+Agent calls MCP tools internally
+(scan_project -> apply_ast_transform -> verification -> validation -> secrets scan -> tests)
+        |
+        v
+Agent produces report.json / report.md
+        |
+        v
+CLI prints console summary + writes files to disk
+```
+
+**Optional extension (Phase 5/6):** because the MCP server already exists internally, the entire agent can additionally be exposed as a *single* MCP tool (e.g. `run_migration(project_path, migration_type)`), letting other MCP-compatible agent hosts (Claude Code, Claude Desktop, etc.) invoke AutoMigrate as a tool inside *their* workflows. This is additive — it does not replace the CLI as the primary interface for a human user.
+
+---
+
+## 6. Installation & CLI Usage
+
+AutoMigrate ships as a standard Python package with a console-script entry point — install and run like any other dev tool (`eslint`, `pytest`, `ng`).
+
+```bash
+pip install automigrate
+```
+
+**Run a full migration** (scan → transform → verify → validate → secrets scan → test → report, all in one command):
+
+```bash
+automigrate migrate ./my-project --framework angular --migration control-flow
+```
+
+**Other subcommands**, for finer-grained control when needed:
+
+```bash
+automigrate dry-run ./my-project --framework angular --migration control-flow   # plan only, no writes
+automigrate scan ./my-project --framework angular                                # classification only
+automigrate report ./reports/run_2026_08_22_0031                                  # re-render a past report
+```
+
+Everything from scanning to testing happens inside the single `migrate` command by default — the subcommands exist for users who want to inspect or control an individual stage, the same way `git status` and `git commit` are both valid without one requiring the other.
+
+---
+
+## 7. Overall Project Workflow
 
 This is the core of the system. Everything else in the README supports this loop.
 
 ```mermaid
 flowchart TD
-    A[Entry Point: CLI / Agent Trigger] --> B[Planner Node]
+    A[Entry Point: CLI Command] --> B[Planner Node]
     B --> C[scan_project]
     C --> D{Transformation Strategy?}
     D -->|Deterministic| E[apply_ast_transform]
@@ -95,11 +151,11 @@ flowchart TD
     Tk --> P
 ```
 
-> Every node in this graph emits trace events to LangSmith, so a failed run can be replayed step-by-step rather than debugged from logs alone.
+> Every node in this graph emits trace events to LangSmith, so a failed run can be replayed step-by-step rather than debugged from logs alone. Every node in this graph is a call to an MCP tool — the CLI never calls these directly; only the LangGraph agent does.
 
 ### Step-by-step narrative
 
-1. **Entry Point** — The agent is invoked (CLI command, dry-run flag, or triggered task) with a target project path and a migration type.
+1. **Entry Point (CLI)** — The user runs `automigrate migrate` (or `dry-run`), which boots the LangGraph agent with a target project path and migration type.
 2. **Planner Node (LangGraph)** — The brain of the system. Maintains state: file queue, retry counts, confidence scores, dependency order, dry-run flag. Decides what happens next at every step.
 3. **`scan_project` (MCP tool)** — Walks the codebase, parses ASTs, and classifies each match as either a known deterministic pattern or an ambiguous case.
 4. **Deterministic path** — If a rule-based transform exists, `apply_ast_transform` runs it directly. No LLM call needed — fast, cheap, reliable.
@@ -109,17 +165,18 @@ flowchart TD
 8. **Static Validation (AST → compile → type-check → lint)** — Only code that survives this stage proceeds further. This is what keeps the pipeline fast — most trivial failures are caught here instead of burning a full test run.
 9. **Secrets Scanning Gate** — Runs after static validation, before tests: catches credentials the LLM may have hallucinated as placeholders or copied from a fixture/context file.
 10. **`run_test_suite` (MCP tool)** — Full behavioral validation against the project's real tests.
-11. **Confidence Calculator** — Combines every validation signal into a single score (see Section 7).
+11. **Confidence Calculator** — Combines every validation signal into a single score (see Section 9).
 12. **Conditional routing** — Pass -> confidence-scored and reported. Fail -> failure is classified, and the planner re-plans with that specific failure context, up to a retry budget. Retries exhausted -> escalated to a human review ticket.
-13. **Loop** — The planner pulls the next file (respecting dependency order; independent files fan out in parallel via LangGraph's `Send` mechanism, see Section 10) and repeats until the queue is empty.
-14. **Final Report** — A structured summary a human actually reads (see Section 8).
+13. **Loop** — The planner pulls the next file (respecting dependency order; independent files fan out in parallel via LangGraph's `Send` mechanism, see Section 12) and repeats until the queue is empty.
+14. **Final Report** — Written to disk and summarized on the CLI (see Section 10).
 
 ---
 
-## 6. Component Responsibility Matrix
+## 8. Component Responsibility Matrix
 
 | Component | Type | Responsibility |
 |---|---|---|
+| CLI | User interface | Parses commands, boots the agent, prints console summary, exits |
 | Planner Node | LangGraph node | Owns agent state, decides next action, tracks retries/confidence/dependency order/dry-run |
 | `scan_project` | MCP tool | AST parsing, pattern classification |
 | `apply_ast_transform` | MCP tool | Executes deterministic, engine-agnostic AST transforms |
@@ -133,13 +190,13 @@ flowchart TD
 | `run_test_suite` | MCP tool | Runs existing tests, returns pass/fail + logs |
 | Confidence Calculator | LangGraph node | Aggregates validation signals into a single score |
 | `create_review_ticket` | MCP tool | Surfaces low-confidence/failed changes to a human |
-| Report Generator | LangGraph terminal node | Compiles final migration summary |
+| Report Generator | LangGraph terminal node | Compiles final migration summary, writes to disk |
 | Tracing Layer (LangSmith) | Observability integration | Records and replays every node's inputs/outputs |
 | RAG Evaluator (Ragas) | Offline evaluation | Scores retrieval faithfulness and context relevance |
 
 ---
 
-## 7. Confidence Score Calculation
+## 9. Confidence Score Calculation
 
 Confidence is derived from observable validation signals rather than an arbitrary LLM self-reported probability.
 
@@ -161,23 +218,81 @@ Confidence is derived from observable validation signals rather than an arbitrar
 
 ---
 
-## 8. Final Migration Report
+## 10. Output Format & Access
 
-Each run produces a report containing:
+The output has two layers, and the distinction matters: **the CLI is the interface, disk is the record.**
 
-- Files transformed
-- Transformation strategy used (deterministic vs. LLM-generated)
-- Confidence score per file
-- Validation status (AST / type-check / lint / secrets scan / test)
-- Tests executed
-- Retry count and failure category (if any)
-- Human review required (yes/no)
-- Estimated engineering time saved
-- Link to the traced run in LangSmith for replay
+### 10.1 Live console output (during the run)
+
+The CLI prints progress as the agent works, and a final summary block when it finishes:
+
+```
+AutoMigrate run complete: run_2026_08_22_0031
+  12 files processed
+  9  auto-approved   (avg confidence 93)
+  3  flagged for review
+  Full report: reports/run_2026_08_22_0031/report.md
+  Trace: https://smith.langchain.com/.../run_2026_08_22_0031
+```
+
+This exists so the user gets an immediate "did it work, what do I do next" signal without having to open a file. It disappears once the terminal session ends — it is a view, not the record.
+
+### 10.2 Persistent disk output (after the run)
+
+Written to `reports/run_<id>/`, and this is what actually outlives the CLI session — readable by a human later, or by a CI pipeline that gates a merge on it:
+
+```
+reports/run_2026_08_22_0031/
+├── report.json      ← canonical, machine-readable record (source of truth)
+├── report.md          ← human-readable rendering of the same data
+└── logs/                ← raw tool outputs (test logs, lint output, etc.)
+```
+
+`report.json` is canonical — `report.md` is generated from it, not maintained separately, so the two can never drift out of sync. Rough shape:
+
+```json
+{
+  "run_id": "run_2026_08_22_0031",
+  "migration_type": "angular_control_flow",
+  "files": [
+    {
+      "file": "src/app/dashboard.component.html",
+      "strategy": "deterministic",
+      "confidence_score": 90,
+      "validation": {
+        "ast": "pass", "type_check": "pass", "lint": "pass",
+        "secrets_scan": "pass", "tests": "pass"
+      },
+      "retry_count": 0,
+      "failure_category": null,
+      "human_review_required": false,
+      "trace_url": "https://smith.langchain.com/.../run_2026_08_22_0031/f1"
+    }
+  ],
+  "summary": {
+    "total_files": 12,
+    "auto_approved": 9,
+    "flagged_for_review": 3,
+    "avg_confidence": 93,
+    "time_saved_estimate_hours": 6.0
+  }
+}
+```
+
+### 10.3 Review tickets
+
+`create_review_ticket` writes a markdown file per flagged file into `reports/run_<id>/review/` by default. As a stretch enhancement (Phase 5/6), this can instead open a real GitHub Issue via the GitHub API, carrying the file, confidence score, failure reason, and trace link — putting the human-in-the-loop step somewhere a reviewer would actually see it, rather than another file they have to remember to check.
+
+### 10.4 Why this format, not just a printed report
+
+- **JSON is canonical** because the confidence score, validation status, and review flag are meant to drive decisions (CI gating, ticket creation, skip-on-next-run) — not just be read by a person.
+- **Markdown is derived, not separate**, so there's a human-readable view without a second source of truth to keep in sync.
+- **Disk persistence** is required because the CLI process exits and the terminal scrollback disappears — the report has to outlive that session for CI or a later reviewer to use it.
+- **The trace link ties every reported file back to a replayable LangSmith run**, which is what actually lets you debug *why* the agent made a decision, not just *that* it made one.
 
 ---
 
-## 9. Failure-Aware Retry
+## 11. Failure-Aware Retry
 
 Retries are driven by failure classification rather than blindly re-invoking the LLM.
 
@@ -187,7 +302,7 @@ The planner selects a recovery strategy based on the detected category — e.g.,
 
 ---
 
-## 10. Dependency Analysis & Parallel Execution
+## 12. Dependency Analysis & Parallel Execution
 
 Before migration begins, the planner constructs a dependency graph across the target files.
 
@@ -197,30 +312,32 @@ Before migration begins, the planner constructs a dependency graph across the ta
 - Prevent cascading failures from out-of-order transforms
 - Group independent files for parallel execution using LangGraph's native fan-out (`Send`) pattern — dispatching independent files to parallel branches and aggregating results at a join node, without introducing a separate orchestration system
 
-> Scoped as a Phase 5+ extension — see Section 12.
+> Scoped as a Phase 5+ extension — see Section 13.
 
 ---
 
-## 11. Dry Run Mode
+## 13. Dry Run Mode
 
-Executes the full planning and analysis pipeline without modifying the project. Outputs: files that would change, planned transformation strategy per file, estimated migration complexity, predicted confidence, and an estimate of how many files will need human review.
+Executes the full planning and analysis pipeline without modifying the project (`automigrate dry-run`). Outputs: files that would change, planned transformation strategy per file, estimated migration complexity, predicted confidence, and an estimate of how many files will need human review.
 
-Because dry-run reuses the planner and scanning logic directly (just short-circuiting the write/execute step), it's introduced as soon as the planner exists rather than as a late-stage feature — see Phase 2 in Section 12. It's a low-cost, high-trust artifact: showing stakeholders exactly what *would* happen before anything actually changes.
+Because dry-run reuses the planner and scanning logic directly (just short-circuiting the write/execute step), it's introduced as soon as the planner exists rather than as a late-stage feature — see Phase 2 in Section 14. It's a low-cost, high-trust artifact: showing stakeholders exactly what *would* happen before anything actually changes.
 
 ---
 
-## 12. Development Phases
+## 14. Development Phases
 
 ### Phase 1 — Foundations
 - Define one target migration (e.g., Angular `*ngIf`/`*ngFor` → `@if`/`@for`)
 - Build the MCP server skeleton and expose `scan_project` + `apply_ast_transform` as tools
+- Build the CLI skeleton (`automigrate migrate`) that boots the agent
 - Get a deterministic-only pipeline working end-to-end on a small fixture project
 
 ### Phase 2 — Agentic Orchestration + Dry Run
 - Design the LangGraph state schema (file queue, retry count, confidence, test results, failure category, dry-run flag)
 - Implement the planner node and conditional edges (pass/fail/retry/escalate)
-- Implement Dry Run Mode alongside the planner (Section 11)
+- Implement Dry Run Mode alongside the planner (`automigrate dry-run`, Section 13)
 - Wire in static validation (AST/compile/type-check/lint) and `run_test_suite`
+- Implement `report.json` writing and the CLI console summary (Section 10)
 
 ### Phase 3 — RAG-Grounded Fallback + Reranking
 - Index official migration guides, release notes, RFCs, and past reviewed fixes into a vector store
@@ -229,32 +346,34 @@ Because dry-run reuses the planner and scanning logic directly (just short-circu
 - Confirm reranked retrieval measurably improves fallback transform correctness vs. a no-reranker baseline
 
 ### Phase 4 — Confidence, Reporting, Observability & Human-in-the-Loop
-- Implement the confidence calculator (Section 7) and `create_review_ticket`
-- Build the failure-aware retry classifier (Section 9)
+- Implement the confidence calculator (Section 9) and `create_review_ticket` (Section 10.3)
+- Build the failure-aware retry classifier (Section 11)
 - Integrate LangSmith tracing across all nodes and Ragas for RAG-quality evaluation
-- Build the final report generator (Section 8), including a link to the traced run
+- Generate `report.md` from `report.json`, including the LangSmith trace link
 
 ### Phase 5 — Extensions (Stretch Goals)
-- Dependency analysis and LangGraph fan-out parallel execution (Section 10)
-- Rollback/checkpointing for repeatedly-failing files
-- Full evaluation metrics suite (Section 14)
+- Dependency analysis and LangGraph fan-out parallel execution (Section 12)
+- Rollback/checkpointing for repeatedly-failing files (Section 15)
+- GitHub Issue integration for review tickets
+- Expose the full agent as a single composable MCP tool for other agent hosts (Section 5)
+- Full evaluation metrics suite (Section 16)
 
 ### Phase 6 — Demo & Polish
 - Curate a representative fixture repo with realistic edge cases
-- Record a live demo: dry run preview -> agent migrates -> verification catches an issue -> test fails -> agent retries with failure context -> agent escalates a genuinely ambiguous case -> replay the run in LangSmith
+- Record a live demo: `automigrate dry-run` preview -> `automigrate migrate` -> verification catches an issue -> test fails -> agent retries with failure context -> agent escalates a genuinely ambiguous case -> replay the run in LangSmith
 - Write up results: % auto-approved, % flagged, time saved vs. manual baseline
 
 ---
 
-## 13. Rollback
+## 15. Rollback
 
 Every transformation is checkpointed. If validation repeatedly fails for a file, the agent restores only that file rather than reverting the entire migration run.
 
-> Scoped as a Phase 5+ extension — see Section 12.
+> Scoped as a Phase 5+ extension — see Section 14.
 
 ---
 
-## 14. Evaluation Metrics
+## 16. Evaluation Metrics
 
 - Automatic Migration Rate
 - Human Review Rate
@@ -268,10 +387,17 @@ Every transformation is checkpointed. If validation repeatedly fails for a file,
 
 ---
 
-## 15. Project Structure (Suggested)
+## 17. Project Structure (Suggested)
 
 ```
 automigrate/
+├── cli/
+│   ├── main.py                    # CLI entry point (console-script)
+│   └── commands/
+│       ├── migrate.py
+│       ├── dry_run.py
+│       ├── scan.py
+│       └── report.py
 ├── mcp_server/
 │   ├── tools/
 │   │   ├── scan_project.py
@@ -300,12 +426,13 @@ automigrate/
 │   ├── langsmith_config.py         # Tracing setup
 │   └── ragas_eval.py                # RAG quality evaluation
 ├── fixtures/                       # Sample project(s) used for testing/demo
-└── reports/                        # Output migration summaries
+├── reports/                        # Output migration summaries (report.json / report.md / logs)
+└── pyproject.toml                  # Packaging + console-script entry point
 ```
 
 ---
 
-## 16. Extensible Transformation Framework
+## 18. Extensible Transformation Framework
 
 The orchestration layer (planner, RAG grounding, verification, validation, confidence scoring, tracing) is designed to stay unchanged as new transformation plugins are added. Future plugins could target:
 
@@ -319,6 +446,6 @@ The orchestration layer (planner, RAG grounding, verification, validation, confi
 
 ---
 
-## 17. Disclaimer
+## 19. Disclaimer
 
 This project is a demonstration of agentic AI orchestration (LangGraph + MCP + RAG + reranking + tracing) applied to code migration, built for learning and portfolio purposes. It is scoped to one framework and one migration type for the core deliverable, with dependency analysis/parallel execution and rollback treated as stretch goals rather than core-path claims. It is not intended as a production replacement for enterprise migration tooling.
