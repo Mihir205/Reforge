@@ -1,7 +1,7 @@
 # AutoMigrate Report — `run_test`
 
-**Timestamp:** 2026-08-24T22:33:02.156224  
-**Project:** `C:\Users\mihir\AppData\Local\Temp\pytest-of-mihir\pytest-9\test_report_and_ticket_generat0\project4`  
+**Timestamp:** 2026-08-24T22:36:44.629178  
+**Project:** `C:\Users\mihir\AppData\Local\Temp\pytest-of-mihir\pytest-13\test_report_and_ticket_generat0\project4`  
 **Migration:** `angular_control_flow`
 
 ## Summary

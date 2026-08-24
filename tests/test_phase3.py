@@ -88,7 +88,8 @@ class TestPhase3Orchestration:
     def test_ambiguous_routing_and_fallback(self, tmp_path):
         """Test that an ambiguous pattern triggers the RAG/LLM path.
 
-        ChatOllama is mocked so this test doesn't require a live Ollama server.
+        The LLM node itself is mocked at the graph level so the test is
+        fast and doesn't require a live Ollama server.
         """
         project_dir = tmp_path / "project3"
         project_dir.mkdir()
@@ -96,16 +97,20 @@ class TestPhase3Orchestration:
         # ngif_async_pipe is classified as ambiguous in our rule registry
         test_file.write_text('<div *ngIf="data$ | async as data"><p>{{ data }}</p></div>')
 
-        # Mock Ollama so we get a deterministic, valid transformed response.
-        mock_response = MagicMock()
-        mock_response.content = "@if (data$ | async; as data) {\n  <div><p>{{ data }}</p></div>\n}"
+        transformed_html = "@if (data$ | async; as data) {\n  <div><p>{{ data }}</p></div>\n}"
 
-        with patch("automigrate.agent.nodes.llm_transform.ChatOllama") as MockOllama:
-            mock_chain = MagicMock()
-            mock_chain.invoke.return_value = mock_response
-            # chain = prompt | llm — mock __or__ to return our mock chain
-            MockOllama.return_value.__or__ = MagicMock(return_value=mock_chain)
+        def mock_llm_node(state):
+            """Simulated LLM node: writes the pre-canned transform to disk."""
+            curr = state.get("current_file")
+            if not curr:
+                return {}
+            filepath = f"{state['project_path']}/{curr.file_path}"
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(transformed_html)
+            return {"transformed_content": transformed_html, "diff": "mock diff"}
 
+        # Patch the node in the graph module (where it was imported at load time)
+        with patch("automigrate.agent.graph.llm_transform_node", mock_llm_node):
             app = create_agent_graph()
             initial_state = _base_initial_state(
                 project_dir, [FileTask(file_path="ambiguous.html")]
