@@ -6,42 +6,40 @@
 <!-- ==========================================================================
   Pattern 1: Simple *ngIf
 ========================================================================== -->
-@if (isLoggedIn) {
-  <p>Welcome back!</p>
-}
+<p *ngIf="isLoggedIn">Welcome back!</p>
 
 <!-- ==========================================================================
   Pattern 2: *ngIf with else
 ========================================================================== -->
-@if (hasPermission) {
-  <div>
+<div *ngIf="hasPermission; else noPermission">
   <h2>Admin Panel</h2>
   <p>You have full access to the dashboard.</p>
 </div>
-} @else {
+
+<ng-template #noPermission>
   <p>Access denied. Please contact your administrator.</p>
-}
+</ng-template>
+
 <!-- ==========================================================================
   Pattern 3: *ngIf with then/else
 ========================================================================== -->
-@if (isLoading) {
-  <div class="spinner">Loading...</div>
-} @else {
-  <div class="content">Data loaded successfully.</div>
-}
+<div *ngIf="isLoading; then loading; else content"></div>
 
 <ng-template #loading>
   <div class="spinner">Loading...</div>
 </ng-template>
+
+<ng-template #content>
+  <div class="content">Data loaded successfully.</div>
+</ng-template>
+
 <!-- ==========================================================================
   Pattern 4: Simple *ngFor
 ========================================================================== -->
 <ul>
-  @for (item of items; track trackByItem($index, item)) {
-  <li>
+  <li *ngFor="let item of items; trackBy: trackByItem">
     {{ item.name }} — {{ item.price | currency }}
   </li>
-}
 </ul>
 
 <ng-template #emptyItems>
@@ -51,13 +49,11 @@
 <!-- ==========================================================================
   Pattern 5: *ngFor with index and trackBy
 ========================================================================== -->
-@for (item of items; track trackByItem($index, item); let i = $index) {
-  <div>
+<div *ngFor="let item of items; let i = index; trackBy: trackByItem">
   <span class="index">{{ i + 1 }}</span>
   <h3>{{ item.title }}</h3>
   <p>{{ item.description }}</p>
 </div>
-}
 
 <!-- ==========================================================================
   Pattern 6: *ngFor with multiple local variables
@@ -77,76 +73,50 @@
 <!-- ==========================================================================
   Pattern 7: *ngSwitch
 ========================================================================== -->
-@switch (status) {
-  @case ('active') {
-    <p class="status-active">Active</p>
-  }
-  @case ('inactive') {
-    <p class="status-inactive">Inactive</p>
-  }
-  @case ('pending') {
-    <p class="status-pending">Pending Review</p>
-  }
-  @default {
-    <p class="status-unknown">Unknown Status</p>
-  }
-}
+<div [ngSwitch]="status">
+  <p *ngSwitchCase="'active'" class="status-active">Active</p>
+  <p *ngSwitchCase="'inactive'" class="status-inactive">Inactive</p>
+  <p *ngSwitchCase="'pending'" class="status-pending">Pending Review</p>
+  <p *ngSwitchDefault class="status-unknown">Unknown Status</p>
+</div>
 
 <!-- ==========================================================================
   Pattern 8: Nested *ngIf inside *ngFor
 ========================================================================== -->
-@for (user of users; track trackByUser($index, user)) {
-  <div>
-  @if (user.isActive) {
-  <div>
+<div *ngFor="let user of users; trackBy: trackByUser">
+  <div *ngIf="user.isActive" class="user-card">
     <h3>{{ user.name }}</h3>
-    @if (user.isAdmin) {
-  <span>Admin</span>
-}
-    @if (!user.isAdmin) {
-  <span>Member</span>
-}
+    <span *ngIf="user.isAdmin" class="badge admin">Admin</span>
+    <span *ngIf="!user.isAdmin" class="badge member">Member</span>
   </div>
-}
-}
 </div>
 
 
 <!-- ==========================================================================
   Pattern 10: Complex nested — *ngFor with *ngIf and *ngSwitch
 ========================================================================== -->
-@for (order of orders; track trackByOrder($index, order)) {
-  <div>
-  @if (order.items.length > 0) {
-  <div>
+<div *ngFor="let order of orders; trackBy: trackByOrder">
+  <div *ngIf="order.items.length > 0">
     <h3>Order #{{ order.id }}</h3>
 
-    @switch (order.status) {
-  @case ('shipped') {
-    <span class="badge shipped">
+    <div [ngSwitch]="order.status">
+      <span *ngSwitchCase="'shipped'" class="badge shipped">
         Shipped
       </span>
-  }
-  @case ('delivered') {
-    <span class="badge delivered">
+
+      <span *ngSwitchCase="'delivered'" class="badge delivered">
         Delivered
       </span>
-  }
-  @default {
-    <span class="badge processing">
+
+      <span *ngSwitchDefault class="badge processing">
         Processing
       </span>
-  }
-}
-}
-}
+    </div>
   </div>
 
   <ul>
-    @for (item of order.items; track trackByItem($index, item)) {
-  <li>
+    <li *ngFor="let item of order.items; trackBy: trackByItem">
       {{ item.name }} x{{ item.qty }}
     </li>
-}
   </ul>
 </div>

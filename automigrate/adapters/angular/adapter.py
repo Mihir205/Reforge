@@ -59,16 +59,48 @@ class AngularAdapter(FrameworkAdapter):
 
     @classmethod
     def detect(cls, project_path: str) -> bool:
-        """True if package.json lists @angular/core as a dependency."""
-        pkg = Path(project_path) / "package.json"
-        data = cls._read_json(pkg)
-        if data is None:
-            return False
-        all_deps = {
-            **data.get("dependencies", {}),
-            **data.get("devDependencies", {}),
-        }
-        return "@angular/core" in all_deps
+        """True if this looks like an Angular project.
+
+        Checks (in order):
+          1. package.json has @angular/core dependency (full Angular app)
+          2. angular.json exists (workspace config)
+          3. .angular/ cache directory exists
+          4. HTML files contain *ngIf / *ngFor directives (fixture directories)
+        """
+        root = Path(project_path)
+
+        # 1. package.json with @angular/core
+        pkg = cls._read_json(root / "package.json")
+        if pkg is not None:
+            all_deps = {
+                **pkg.get("dependencies", {}),
+                **pkg.get("devDependencies", {}),
+            }
+            if "@angular/core" in all_deps:
+                return True
+
+        # 2. angular.json workspace config
+        if (root / "angular.json").exists():
+            return True
+
+        # 3. .angular cache dir
+        if (root / ".angular").is_dir():
+            return True
+
+        # 4. HTML files containing Angular structural directives (fixture dirs)
+        import os
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in {"node_modules", ".git", "dist"}]
+            for fname in filenames:
+                if fname.endswith(".html"):
+                    try:
+                        content = (Path(dirpath) / fname).read_text(encoding="utf-8", errors="ignore")
+                        if any(p in content for p in ("*ngIf", "*ngFor", "*ngSwitch", "[(ngModel)]")):
+                            return True
+                    except OSError:
+                        continue
+
+        return False
 
     # ── Migrations catalogue ─────────────────────────────────────────────────
 

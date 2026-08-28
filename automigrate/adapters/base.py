@@ -16,7 +16,10 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    from automigrate.agent.state import ValidationResult
 
 from automigrate.transforms.base_rules import RuleRegistry
 
@@ -172,7 +175,7 @@ class FrameworkAdapter(ABC):
 
     def get_static_validators(
         self, migration_type: str
-    ) -> list[Callable[[str, str, str], "ValidationResult"]]:  # noqa: F821
+    ) -> list[Callable[[str, str, str], "ValidationResult"]]:
         """Return a list of static validator callables.
 
         Each callable has the signature:
