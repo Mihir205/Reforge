@@ -75,8 +75,9 @@ def report_generator_node(state: MigrationState) -> dict:
     total = len(completed) + len(escalated)
     run_id = state.get("run_id", f"run_{datetime.now().strftime('%Y_%m_%d_%H%M')}")
 
+    output_dir = state.get("output_dir", "reports")
     # Build per-run output directory
-    run_dir = Path("reports") / run_id
+    run_dir = Path(output_dir) / run_id
     review_dir = run_dir / "review"
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -97,6 +98,7 @@ def report_generator_node(state: MigrationState) -> dict:
             validation_errors=errors,
             test_logs=test_logs,
             run_id=run_id,
+            output_dir=str(review_dir),
         )
 
     # 2. Compute summary stats

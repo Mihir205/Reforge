@@ -1,7 +1,7 @@
-# AutoMigrate Report — `run_2026_08_24_2217`
+# AutoMigrate Report — `run_2026_08_27_2126`
 
-**Timestamp:** 2026-08-24T22:17:20.985834  
-**Project:** `C:\Users\mihir\AppData\Local\Temp\pytest-of-mihir\pytest-8\test_live_run_routing0\project2`  
+**Timestamp:** 2026-08-27T21:26:28.008258  
+**Project:** `C:\projects\Reforge\fixtures\angular-demo`  
 **Migration:** `angular_control_flow`
 
 ## Summary
@@ -18,4 +18,4 @@
 
 | File | Strategy | Confidence | Status |
 |---|---|---|---|
-| `test2.html` | deterministic | 100.0 | ✅ Auto-approved |
+| `src\app\demo.component.html` | deterministic | 100.0 | ✅ Auto-approved |

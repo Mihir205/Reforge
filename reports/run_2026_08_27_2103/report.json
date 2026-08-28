@@ -1,15 +1,15 @@
 {
-  "run_id": "run_test",
-  "timestamp": "2026-08-25T22:37:11.700122",
-  "project": "C:\\Users\\mihir\\AppData\\Local\\Temp\\pytest-of-mihir\\pytest-19\\test_report_and_ticket_generat0\\project4",
+  "run_id": "run_2026_08_27_2103",
+  "timestamp": "2026-08-27T21:04:53.393288",
+  "project": "C:\\projects\\Reforge\\fixtures\\angular-demo",
   "migration_type": "angular_control_flow",
   "files": [
     {
-      "file": "report_test.html",
+      "file": "src\\app\\demo.component.html",
       "strategy": "ambiguous",
-      "confidence_score": 0.0,
+      "confidence_score": 60.0,
       "validation": {},
-      "retry_count": 0,
+      "retry_count": 1,
       "failure_category": "unknown",
       "human_review_required": true,
       "trace_url": null
@@ -19,7 +19,7 @@
     "total_files": 1,
     "auto_approved": 0,
     "flagged_for_review": 1,
-    "avg_confidence": 0.0,
+    "avg_confidence": 60.0,
     "time_saved_estimate_hours": 0.0
   }
 }

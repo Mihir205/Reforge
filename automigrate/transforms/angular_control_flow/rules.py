@@ -272,7 +272,7 @@ _RULES: list[TransformRule] = [
         detect_pattern=(
             r'<(?P<tag>[a-zA-Z][\w-]*)'
             r'(?P<attrs>[^>]*?)'
-            r'\*ngIf="(?P<condition>[^;]+);\s*then\s+(?P<then_ref>\w+);\s*else\s+(?P<else_ref>\w+)"'
+            r'\*ngIf="(?P<condition>[^";]+);\s*then\s+(?P<then_ref>\w+);\s*else\s+(?P<else_ref>\w+)"'
             r'(?P<attrs2>[^>]*?)'
             r'>'
             r'(?P<inner>.*?)'
@@ -288,7 +288,7 @@ _RULES: list[TransformRule] = [
         detect_pattern=(
             r'<(?P<tag>[a-zA-Z][\w-]*)'
             r'(?P<attrs>[^>]*?)'
-            r'\*ngIf="(?P<condition>[^;]+);\s*else\s+(?P<else_ref>\w+)"'
+            r'\*ngIf="(?P<condition>[^";]+);\s*else\s+(?P<else_ref>\w+)"'
             r'(?P<attrs2>[^>]*?)'
             r'>'
             r'(?P<inner>.*?)'

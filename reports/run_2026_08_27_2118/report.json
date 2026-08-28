@@ -1,0 +1,31 @@
+{
+  "run_id": "run_2026_08_27_2118",
+  "timestamp": "2026-08-27T21:19:20.765233",
+  "project": "C:\\projects\\Reforge\\fixtures\\angular-demo",
+  "migration_type": "angular_control_flow",
+  "files": [
+    {
+      "file": "src\\app\\demo.component.html",
+      "strategy": "deterministic",
+      "confidence_score": 60.0,
+      "validation": {
+        "ast": "pass",
+        "type_check": "pass",
+        "lint": "pass",
+        "secrets_scan": "pass",
+        "tests": "pass"
+      },
+      "retry_count": 0,
+      "failure_category": null,
+      "human_review_required": false,
+      "trace_url": null
+    }
+  ],
+  "summary": {
+    "total_files": 1,
+    "auto_approved": 1,
+    "flagged_for_review": 0,
+    "avg_confidence": 60.0,
+    "time_saved_estimate_hours": 0.25
+  }
+}

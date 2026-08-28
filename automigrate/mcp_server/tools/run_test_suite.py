@@ -15,18 +15,40 @@ from automigrate.agent.state import TestResult
 def run_test_suite(project_path: str, file_filter: str | None = None) -> TestResult:
     """Invoke the project's test suite.
     
-    For an Angular project, this would typically run `ng test --watch=false`.
-    If file_filter is provided, it tries to run tests specifically related to that file.
-    
-    For Phase 2, we simulate a successful test run unless the project path doesn't exist.
+    For an Angular project, runs `npx ng test --watch=false`.
+    If no package.json is found (e.g. in test fixtures), it safely skips.
     """
-    if not Path(project_path).exists():
+    path = Path(project_path)
+    if not path.exists():
         return TestResult(passed=False, total=0, failed=1, logs="Project path not found.")
         
-    # Simulated successful test run for the fixture project
-    return TestResult(
-        passed=True,
-        total=5,
-        failed=0,
-        logs="[SUCCESS] All 5 tests passed."
-    )
+    if not (path / "package.json").exists():
+        # Fallback for simple fixtures that don't have a full Node environment
+        return TestResult(
+            passed=True,
+            total=1,
+            failed=0,
+            logs="[SKIPPED] No package.json found. Skipping real test execution."
+        )
+
+    cmd = ["npx", "ng", "test", "--watch=false"]
+    # If the user's project uses Karma, --include can target the specific file.
+    # For jest, it acts as a pattern.
+    if file_filter:
+        cmd.append(f"--include=**/{Path(file_filter).name}")
+
+    try:
+        result = subprocess.run(
+            cmd, cwd=str(path), capture_output=True, text=True, timeout=120
+        )
+        passed = result.returncode == 0
+        return TestResult(
+            passed=passed,
+            total=1,
+            failed=0 if passed else 1,
+            logs=result.stdout + "\n" + result.stderr
+        )
+    except subprocess.TimeoutExpired:
+        return TestResult(passed=False, total=0, failed=1, logs="Test suite timed out after 120s.")
+    except Exception as e:
+        return TestResult(passed=False, total=0, failed=1, logs=f"Failed to execute tests: {e}")

@@ -1,10 +1,10 @@
-# Migration Review Required: `secret.html`
+# Migration Review Required: `angular-demo\src\app\demo.component.html`
 
-**Confidence Score:** 0.0/100
+**Confidence Score:** 40.0/100
 **Strategy Used:** ambiguous
 
 ## Validation Errors
-- Secret detected: AWS Access Key
+None
 
 ## Test Output
 ```text

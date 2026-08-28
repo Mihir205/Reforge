@@ -36,10 +36,42 @@ def run_static_validation(file_path: str, project_path: str) -> dict[str, Valida
     if not ast_passed:
         return results
 
-    # 2. Type Check (Simulated for Angular: we would normally run `tsc --noEmit`)
-    results["TypeCheck"] = ValidationResult(passed=True, stage="TypeCheck")
+    # 2. Type Check (Run `tsc --noEmit` if tsconfig.json exists)
+    tsconfig = Path(project_path) / "tsconfig.json"
+    if tsconfig.exists():
+        try:
+            res = subprocess.run(
+                ["npx", "tsc", "--noEmit"], 
+                cwd=project_path, 
+                capture_output=True, 
+                text=True, 
+                timeout=60
+            )
+            passed = res.returncode == 0
+            errs = [res.stdout + "\n" + res.stderr] if not passed else []
+            results["TypeCheck"] = ValidationResult(passed=passed, stage="TypeCheck", errors=errs)
+        except Exception as e:
+            results["TypeCheck"] = ValidationResult(passed=False, stage="TypeCheck", errors=[str(e)])
+    else:
+        results["TypeCheck"] = ValidationResult(passed=True, stage="TypeCheck", errors=["[SKIPPED] No tsconfig.json found"])
     
-    # 3. Lint (Simulated)
-    results["Lint"] = ValidationResult(passed=True, stage="Lint")
+    # 3. Lint (Run `eslint` if eslintrc exists)
+    eslint_config = Path(project_path) / ".eslintrc.json"
+    if eslint_config.exists():
+        try:
+            res = subprocess.run(
+                ["npx", "eslint", file_path], 
+                cwd=project_path, 
+                capture_output=True, 
+                text=True, 
+                timeout=60
+            )
+            passed = res.returncode == 0
+            errs = [res.stdout + "\n" + res.stderr] if not passed else []
+            results["Lint"] = ValidationResult(passed=passed, stage="Lint", errors=errs)
+        except Exception as e:
+            results["Lint"] = ValidationResult(passed=False, stage="Lint", errors=[str(e)])
+    else:
+        results["Lint"] = ValidationResult(passed=True, stage="Lint", errors=["[SKIPPED] No eslint config found"])
     
     return results

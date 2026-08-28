@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from automigrate.agent.state import MigrationState, ValidationResult
 
+import os
+
 # Thresholds — exported so graph.py can use them for routing decisions.
-AUTO_APPROVE_THRESHOLD = 90.0
-QUICK_REVIEW_THRESHOLD = 70.0
+AUTO_APPROVE_THRESHOLD = float(os.getenv("CONFIDENCE_AUTO_APPROVE_THRESHOLD", "90.0"))
+QUICK_REVIEW_THRESHOLD = float(os.getenv("CONFIDENCE_QUICK_REVIEW_THRESHOLD", "70.0"))
 
 
 def calculate_confidence(strategy: str, validation_results: dict | ValidationResult, test_passed: bool) -> float:

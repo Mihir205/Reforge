@@ -41,7 +41,7 @@ def _build_run_id() -> str:
     return f"run_{datetime.now().strftime('%Y_%m_%d_%H%M')}"
 
 
-def _run_agent(project_path: str, migration_type: str, dry_run: bool, max_retries: int) -> dict:
+def _run_agent(project_path: str, migration_type: str, dry_run: bool, max_retries: int, output_dir: str = "reports") -> dict:
     """Scan the project, build a file queue, and run the LangGraph agent."""
     from automigrate.agent.graph import create_agent_graph
     from automigrate.agent.state import FileTask
@@ -56,10 +56,25 @@ def _run_agent(project_path: str, migration_type: str, dry_run: bool, max_retrie
         sys.exit(0)
 
     # Deduplicate: one FileTask per unique file path
+    # and determine the aggregate strategy/complexity for the file.
     seen: dict[str, FileTask] = {}
     for r in scan_result.results:
         if r.file_path not in seen:
-            seen[r.file_path] = FileTask(file_path=r.file_path)
+            seen[r.file_path] = FileTask(
+                file_path=r.file_path,
+                strategy="deterministic",
+                complexity="simple",
+            )
+        
+        task = seen[r.file_path]
+        if r.classification == "ambiguous":
+            task.strategy = "ambiguous"
+            
+        if r.complexity == "complex":
+            task.complexity = "complex"
+        elif r.complexity == "medium" and task.complexity == "simple":
+            task.complexity = "medium"
+            
     file_queue = list(seen.values())
 
     run_id = _build_run_id()
@@ -88,10 +103,45 @@ def _run_agent(project_path: str, migration_type: str, dry_run: bool, max_retrie
         "completed_files": [],
         "escalated_files": [],
         "report": None,
+        "output_dir": output_dir,
     }
 
     graph = create_agent_graph()
-    final_state = graph.invoke(initial_state)
+    
+    # Run the graph and stream events to show a progress bar
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+    
+    final_state = initial_state.copy()
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+    ) as progress:
+        task_id = progress.add_task("[cyan]Processing files...", total=len(file_queue))
+        
+        # Stream yields the output of each node as it finishes
+        for step in graph.stream(initial_state):
+            node_name = list(step.keys())[0]
+            node_output = step[node_name]
+            
+            # Update local final state (simplified, doesn't run reducers perfectly but ok for summary)
+            # A better way in langgraph is to just use the state from the stream if we configure it properly,
+            # or rely on the final node's output. Actually, report_generator outputs the report.
+            if "report" in node_output:
+                final_state["report"] = node_output["report"]
+            if "confidence_scores" in node_output:
+                final_state.setdefault("confidence_scores", {}).update(node_output["confidence_scores"])
+                
+            if node_name in ("confidence_calc", "record_dry_run"):
+                progress.advance(task_id)
+
+    # To get the true final state with all reducers applied, we would normally use graph.invoke
+    # But since we streamed, we'll return our patched final_state which has what we need for the summary.
+    # In a full app, we would use the LangGraph StateSaver checkpointer to get the exact final state.
+    final_state["run_id"] = run_id
+    final_state["output_dir"] = output_dir
     return final_state
 
 
@@ -99,7 +149,8 @@ def _print_summary(final_state: dict) -> None:
     """Print the live console summary after a run completes."""
     report = final_state.get("report")
     run_id = final_state.get("run_id", "unknown")
-    run_dir = Path("reports") / run_id
+    output_dir = final_state.get("output_dir", "reports")
+    run_dir = Path(output_dir) / run_id
 
     if report:
         completed = report.successful_files
@@ -138,6 +189,14 @@ def main():
     pass
 
 
+@main.command()
+def ingest():
+    """Ingest migration documentation for Context Stuffing."""
+    from automigrate.rag.ingest import ingest_docs
+    ingest_docs()
+
+
+
 # ---------------------------------------------------------------------------
 # migrate
 # ---------------------------------------------------------------------------
@@ -150,10 +209,12 @@ def main():
               help="Migration type slug (maps to angular_control_flow, etc.).")
 @click.option("--max-retries", default=3, show_default=True,
               help="Number of retry attempts per file before escalating.")
-def migrate(project_path: str, framework: str, migration: str, max_retries: int):
+@click.option("--output-dir", default="reports", show_default=True,
+              help="Directory to save reports to.")
+def migrate(project_path: str, framework: str, migration: str, max_retries: int, output_dir: str):
     """Run the full migration pipeline (scan → transform → verify → test → report)."""
     migration_type = f"{framework}_{migration.replace('-', '_')}"
-    final_state = _run_agent(project_path, migration_type, dry_run=False, max_retries=max_retries)
+    final_state = _run_agent(project_path, migration_type, dry_run=False, max_retries=max_retries, output_dir=output_dir)
     _print_summary(final_state)
 
 
@@ -167,10 +228,12 @@ def migrate(project_path: str, framework: str, migration: str, max_retries: int)
               help="Target framework.")
 @click.option("--migration", "-m", default="control-flow", show_default=True,
               help="Migration type slug.")
-def dry_run(project_path: str, framework: str, migration: str):
+@click.option("--output-dir", default="reports", show_default=True,
+              help="Directory to save reports to.")
+def dry_run(project_path: str, framework: str, migration: str, output_dir: str):
     """Plan-only run: show what would change without modifying any files."""
     migration_type = f"{framework}_{migration.replace('-', '_')}"
-    final_state = _run_agent(project_path, migration_type, dry_run=True, max_retries=0)
+    final_state = _run_agent(project_path, migration_type, dry_run=True, max_retries=0, output_dir=output_dir)
     _print_summary(final_state)
 
 

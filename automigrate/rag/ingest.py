@@ -1,7 +1,9 @@
 """
-RAG Ingestion Pipeline.
+RAG Ingestion Pipeline (Context Stuffing).
 
-Loads migration guides, chunks them, embeds them, and stores them in ChromaDB.
+Instead of a complex ChromaDB vector store, we just save the 
+Angular Control Flow migration guide as a Markdown file.
+The retriever will load this entire file into the LLM prompt.
 """
 
 from __future__ import annotations
@@ -9,49 +11,81 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from langchain_community.document_loaders import DirectoryLoader, TextLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_chroma import Chroma
+# A simplified, distilled version of the Angular Control Flow docs
+# optimized for LLM consumption.
+ANGULAR_DOCS = """# Angular Control Flow Migration Guide
 
+Angular v17 introduced a new built-in control flow syntax.
 
-def ingest_docs(data_dir: str = "automigrate/rag/data", persist_dir: str = "./data/chroma_db"):
-    """Load documents, split into chunks, and store in vector database."""
+## 1. `@if` Block
+Replaces `*ngIf`.
+**Legacy:** `<div *ngIf="condition">...</div>`
+**New:** `@if (condition) { <div>...</div> }`
+
+**Legacy with else:**
+```html
+<div *ngIf="condition; else fallback">...</div>
+<ng-template #fallback>fallback</ng-template>
+```
+**New:**
+```html
+@if (condition) {
+  <div>...</div>
+} @else {
+  fallback
+}
+```
+
+**Legacy with async as:**
+```html
+<div *ngIf="data$ | async as data">...</div>
+```
+**New:**
+```html
+@if (data$ | async; as data) {
+  <div>...</div>
+}
+```
+
+## 2. `@for` Block
+Replaces `*ngFor`.
+**Legacy:** `<div *ngFor="let item of items; trackBy: trackFn; let i = index">...</div>`
+**New:**
+```html
+@for (item of items; track item.id; let i = $index) {
+  <div>...</div>
+} @empty {
+  <div>No items</div>
+}
+```
+
+## 3. `@switch` Block
+Replaces `*ngSwitch`.
+**Legacy:**
+```html
+<div [ngSwitch]="condition">
+  <div *ngSwitchCase="value1">...</div>
+  <div *ngSwitchDefault>...</div>
+</div>
+```
+**New:**
+```html
+@switch (condition) {
+  @case (value1) { <div>...</div> }
+  @default { <div>...</div> }
+}
+```
+"""
+
+def ingest_docs(data_dir: str = "automigrate/rag/data"):
+    """Write the migration guide to disk so the agent can read it."""
     path = Path(data_dir)
-    if not path.exists():
-        path.mkdir(parents=True, exist_ok=True)
-        
-    loader = DirectoryLoader(
-        str(path),
-        glob="**/*.md",
-        loader_cls=TextLoader,
-        show_progress=True,
-    )
-    docs = loader.load()
+    path.mkdir(parents=True, exist_ok=True)
     
-    if not docs:
-        print("No documents found to ingest.")
-        return
-        
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50,
-        separators=["\n## ", "\n\n", "\n", " ", ""],
-    )
-    splits = text_splitter.split_documents(docs)
+    file_path = path / "angular_control_flow.md"
+    file_path.write_text(ANGULAR_DOCS, encoding="utf-8")
     
-    # Using local embeddings (sentence-transformers)
-    embeddings = HuggingFaceEmbeddings(
-        model_name=os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
-    )
-    
-    # Store in ChromaDB
-    vectorstore = Chroma.from_documents(
-        documents=splits,
-        embedding=embeddings,
-        persist_directory=persist_dir,
-    )
-    print(f"Ingested {len(splits)} chunks into {persist_dir}")
-    
+    print(f"Successfully ingested docs into {file_path}")
+
 if __name__ == "__main__":
     ingest_docs()

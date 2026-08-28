@@ -113,7 +113,8 @@ class TestPhase3Orchestration:
         with patch("automigrate.agent.graph.llm_transform_node", mock_llm_node):
             app = create_agent_graph()
             initial_state = _base_initial_state(
-                project_dir, [FileTask(file_path="ambiguous.html")]
+                project_dir, 
+                [FileTask(file_path="ambiguous.html", strategy="ambiguous")]
             )
             final_state = app.invoke(initial_state)
 

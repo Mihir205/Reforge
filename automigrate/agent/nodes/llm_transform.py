@@ -21,8 +21,9 @@ def llm_transform_node(state: MigrationState) -> dict:
     if not current_file:
         return {}
         
+    from pathlib import Path
     project_path = state["project_path"]
-    full_path = f"{project_path}/{current_file.file_path}"
+    full_path = str(Path(project_path) / current_file.file_path)
     
     try:
         content = open(full_path, "r", encoding="utf-8").read()
@@ -41,21 +42,33 @@ def llm_transform_node(state: MigrationState) -> dict:
     failure_ctx = state.get("failure_context", {}).get(current_file.file_path, "")
 
     system_prompt = (
-        "You are an expert Angular developer. Migrate the following template to the new "
-        "control flow syntax based on the provided documentation. "
-        "Reply ONLY with the rewritten code. Do NOT wrap it in markdown block quotes."
-        "\n\nDOCS:\n{context}"
+        "You are an expert Angular developer. Migrate the provided template to the new "
+        "Angular v17 control flow syntax based on the provided documentation.\n\n"
+        "CRITICAL RULES:\n"
+        "1. NEVER put @if, @for, or @switch inside HTML tags like attributes.\n"
+        "2. The control flow syntax MUST wrap the HTML elements, not be inside them.\n"
+        "3. Reply ONLY with the rewritten code. Do NOT wrap it in markdown block quotes.\n\n"
+        "DOCS:\n{context}"
     )
     if failure_ctx:
         system_prompt += f"\n\nPREVIOUS FAILURE CONTEXT (read carefully before rewriting):\n{failure_ctx}"
 
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
+        ("user", "Migrate this template:\n<div *ngIf=\"condition\">\n  <p>Hello</p>\n</div>"),
+        ("assistant", "@if (condition) {{\n  <div>\n    <p>Hello</p>\n  </div>\n}}"),
+        ("user", "Migrate this template:\n<ul>\n  <li *ngFor=\"let item of items; trackBy: trackItem\">\n    {{{{item}}}}\n  </li>\n</ul>"),
+        ("assistant", "<ul>\n  @for (item of items; track trackItem($index, item)) {{\n    <li>\n      {{{{item}}}}\n    </li>\n  }}\n</ul>"),
         ("user", "{code}"),
     ])
     
     ollama_model = os.getenv("OLLAMA_MODEL", "qwen2.5-coder:7b")
-    llm = ChatOllama(model=ollama_model, temperature=0)
+    # Use 127.0.0.1 explicitly to avoid WinError 10049 (IPv6 localhost resolution issue)
+    llm = ChatOllama(
+        model=ollama_model, 
+        temperature=0,
+        base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    )
     chain = prompt | llm
     
     response = chain.invoke({
@@ -72,6 +85,11 @@ def llm_transform_node(state: MigrationState) -> dict:
     
     # Write to disk so static validation can test the real file
     try:
+        import shutil
+        from pathlib import Path
+        p = Path(full_path)
+        if p.exists() and transformed != content:
+            shutil.copy2(p, p.with_suffix(p.suffix + ".bak"))
         with open(full_path, "w", encoding="utf-8") as f:
             f.write(transformed)
     except OSError as e:

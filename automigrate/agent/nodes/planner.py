@@ -164,27 +164,10 @@ def planner_node(state: MigrationState) -> dict:
             "retry_counts": {current_file.file_path: file_retries},
         }
 
-    # ---- First-time scan ----
+    # ---- First-time setup (if strategy not provided) ----
     if not current_file.strategy:
-        scan_result = scan_project(project_path, migration_type)
-        file_matches = [
-            r for r in scan_result.results
-            if r.file_path == current_file.file_path
-        ]
-
-        if not file_matches:
-            current_file.strategy = "deterministic"
-            current_file.complexity = "simple"
-        else:
-            has_ambiguous = any(r.classification == "ambiguous" for r in file_matches)
-            current_file.strategy = "ambiguous" if has_ambiguous else "deterministic"
-
-            if any(r.complexity == "complex" for r in file_matches):
-                current_file.complexity = "complex"
-            elif any(r.complexity == "medium" for r in file_matches):
-                current_file.complexity = "medium"
-            else:
-                current_file.complexity = "simple"
+        current_file.strategy = "deterministic"
+        current_file.complexity = "simple"
 
     return {
         "file_queue": queue,
@@ -203,9 +186,9 @@ def route_after_planner(state: MigrationState) -> str:
     if state.get("dry_run"):
         return "record_result"
 
-    # If the file has already been escalated (budget or secrets), skip to report.
+    # If the file has already been escalated (budget or secrets), loop to the next file.
     if current_file.file_path in state.get("escalated_files", []):
-        return "report_generator"
+        return "planner"
 
     if current_file.strategy == "ambiguous":
         return "rag_retriever"

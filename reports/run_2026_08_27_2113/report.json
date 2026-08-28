@@ -1,13 +1,13 @@
 {
-  "run_id": "run_2026_08_24_2217",
-  "timestamp": "2026-08-24T22:17:20.985834",
-  "project": "C:\\Users\\mihir\\AppData\\Local\\Temp\\pytest-of-mihir\\pytest-8\\test_live_run_routing0\\project2",
+  "run_id": "run_2026_08_27_2113",
+  "timestamp": "2026-08-27T21:13:56.204007",
+  "project": "C:\\projects\\Reforge\\fixtures\\angular-demo",
   "migration_type": "angular_control_flow",
   "files": [
     {
-      "file": "test2.html",
+      "file": "src\\app\\demo.component.html",
       "strategy": "deterministic",
-      "confidence_score": 100.0,
+      "confidence_score": 60.0,
       "validation": {
         "ast": "pass",
         "type_check": "pass",
@@ -25,7 +25,7 @@
     "total_files": 1,
     "auto_approved": 1,
     "flagged_for_review": 0,
-    "avg_confidence": 100.0,
+    "avg_confidence": 60.0,
     "time_saved_estimate_hours": 0.25
   }
 }

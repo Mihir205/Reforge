@@ -25,8 +25,9 @@ def apply_transform_node(state: MigrationState) -> dict:
     if not current_file:
         return {}
         
+    from pathlib import Path
     project_path = state["project_path"]
-    full_path = f"{project_path}/{current_file.file_path}"
+    full_path = str(Path(project_path) / current_file.file_path)
     
     # Run transform
     result = apply_ast_transform(full_path, write=True)
@@ -135,6 +136,7 @@ def create_agent_graph() -> StateGraph:
             "rag_retriever": "rag_retriever",
             "record_result": "record_dry_run",
             "report_generator": "report_generator",
+            "planner": "planner",
         }
     )
     

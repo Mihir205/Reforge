@@ -1,73 +1,62 @@
 # Angular Control Flow Migration Guide
 
-The new `@if`, `@else`, `@for`, and `@switch` syntax provides a built-in, intuitive, and better performing way to handle control flow in Angular templates compared to the legacy structural directives `*ngIf`, `*ngFor`, and `[ngSwitch]`.
+Angular v17 introduced a new built-in control flow syntax.
 
-## `@if` Block
-The `@if` block replaces `*ngIf`.
-Legacy:
+## 1. `@if` Block
+Replaces `*ngIf`.
+**Legacy:** `<div *ngIf="condition">...</div>`
+**New:** `@if (condition) { <div>...</div> }`
+
+**Legacy with else:**
 ```html
-<div *ngIf="loggedIn; else anonymousUser">
-  The user is logged in
-</div>
-<ng-template #anonymousUser>
-  The user is not logged in
-</ng-template>
+<div *ngIf="condition; else fallback">...</div>
+<ng-template #fallback>fallback</ng-template>
 ```
-New:
+**New:**
 ```html
-@if (loggedIn) {
-  <div>The user is logged in</div>
+@if (condition) {
+  <div>...</div>
 } @else {
-  The user is not logged in
+  fallback
 }
 ```
 
-## `@for` Block
-The `@for` block replaces `*ngFor`. It requires a `track` expression.
-Legacy:
+**Legacy with async as:**
 ```html
-<ul>
-  <li *ngFor="let item of items; trackBy: trackById">
-    {{ item.name }}
-  </li>
-</ul>
+<div *ngIf="data$ | async as data">...</div>
 ```
-New:
-```html
-<ul>
-  @for (item of items; track item.id) {
-    <li>{{ item.name }}</li>
-  } @empty {
-    <li>No items found</li>
-  }
-</ul>
-```
-Implicit variables available in `@for`: `$index`, `$first`, `$last`, `$even`, `$odd`, `$count`.
-
-## `@switch` Block
-The `@switch` block replaces `[ngSwitch]`.
-Legacy:
-```html
-<div [ngSwitch]="accessLevel">
-  <admin-dashboard *ngSwitchCase="'admin'"></admin-dashboard>
-  <moderator-dashboard *ngSwitchCase="'moderator'"></moderator-dashboard>
-  <user-dashboard *ngSwitchDefault></user-dashboard>
-</div>
-```
-New:
-```html
-@switch (accessLevel) {
-  @case ('admin') { <admin-dashboard/> }
-  @case ('moderator') { <moderator-dashboard/> }
-  @default { <user-dashboard/> }
-}
-```
-
-## Async Pipe with `@if`
-When migrating `*ngIf="data$ | async as data"`, use `@if`:
+**New:**
 ```html
 @if (data$ | async; as data) {
-  <user-profile [data]="data"></user-profile>
+  <div>...</div>
 }
 ```
-Notice the semicolon separating the condition and the aliasing `as` statement.
+
+## 2. `@for` Block
+Replaces `*ngFor`.
+**Legacy:** `<div *ngFor="let item of items; trackBy: trackFn; let i = index">...</div>`
+**New:**
+```html
+@for (item of items; track item.id; let i = $index) {
+  <div>...</div>
+} @empty {
+  <div>No items</div>
+}
+```
+
+## 3. `@switch` Block
+Replaces `*ngSwitch`.
+**Legacy:**
+```html
+<div [ngSwitch]="condition">
+  <div *ngSwitchCase="value1">...</div>
+  <div *ngSwitchDefault>...</div>
+</div>
+```
+**New:**
+```html
+@switch (condition) {
+  @case (value1) { <div>...</div> }
+  @default { <div>...</div> }
+}
+```
