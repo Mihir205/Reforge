@@ -18,12 +18,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from automigrate.transforms.angular_control_flow.rules import (
-    PatternId,
-    RuleRegistry,
-    TransformRule,
-    registry,
-)
+from automigrate.transforms.base_rules import RuleRegistry, TransformRule
 
 
 @dataclass
@@ -75,7 +70,11 @@ def apply_ast_transform(
         A TransformResult with the original content, transformed content,
         list of applied patterns, and a unified diff.
     """
-    reg = rule_registry or registry
+    if rule_registry is None:
+        # Default: Angular registry for backwards compatibility with the CLI 'transform' command
+        from automigrate.transforms.angular_control_flow.rules import registry as _ang_reg
+        rule_registry = _ang_reg
+    reg = rule_registry
     filepath = Path(file_path)
 
     try:
@@ -171,7 +170,10 @@ def apply_ast_transform_to_string(
     Useful for testing and for the agent pipeline where content is
     passed in-memory.
     """
-    reg = rule_registry or registry
+    if rule_registry is None:
+        from automigrate.transforms.angular_control_flow.rules import registry as _ang_reg
+        rule_registry = _ang_reg
+    reg = rule_registry
     original = template
     transformed = original
     applied: list[str] = []

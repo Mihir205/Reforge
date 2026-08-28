@@ -1,13 +1,17 @@
 """
-CLI entry point for AutoMigrate.
+CLI entry point for Reforge (AutoMigrate).
 
 Provides commands for scanning projects, applying transforms, and running
-the full agent pipeline.
+the full agent pipeline. Supports any framework via auto-detection or
+explicit --framework flag.
 
 Usage:
-  automigrate migrate ./my-project --framework angular --migration control-flow
+  automigrate migrate ./my-project                         # auto-detect framework
+  automigrate migrate ./my-project --framework angular
+  automigrate migrate ./my-project --framework react --migration class_to_hooks
   automigrate dry-run ./my-project
   automigrate scan    ./my-project
+  automigrate list-frameworks
   automigrate report  ./reports/run_2026_08_24_2209
 """
 
@@ -41,22 +45,78 @@ def _build_run_id() -> str:
     return f"run_{datetime.now().strftime('%Y_%m_%d_%H%M')}"
 
 
-def _run_agent(project_path: str, migration_type: str, dry_run: bool, max_retries: int, output_dir: str = "reports") -> dict:
+def _resolve_framework_and_migration(
+    project_path: str,
+    framework: str | None,
+    migration: str | None,
+) -> tuple[str, str]:
+    """Resolve (framework, migration_type), auto-detecting if needed."""
+    from automigrate.adapters.registry import detect_framework, get_adapter
+
+    if framework is None:
+        console.print("[dim]No --framework specified — auto-detecting...[/dim]")
+        adapter = detect_framework(project_path)
+        if adapter is None:
+            console.print(
+                "[bold red]Could not auto-detect framework.[/bold red] "
+                "Please specify --framework (e.g., --framework angular)."
+            )
+            sys.exit(1)
+        framework = adapter.name
+        console.print(f"[bold green]Detected:[/bold green] {adapter.display_name}")
+    else:
+        adapter = get_adapter(framework)
+
+    # Resolve migration slug
+    if migration is None:
+        default_mig = adapter.get_default_migration()
+        migration_type = default_mig.id
+        console.print(
+            f"[dim]No --migration specified — using default: "
+            f"[bold]{default_mig.display_name}[/bold][/dim]"
+        )
+    else:
+        # Normalise dashes to underscores (e.g., "control-flow" → "control_flow")
+        migration_type = migration.replace("-", "_")
+        if not adapter.get_migration(migration_type):
+            supported = [m.id for m in adapter.get_migrations()]
+            console.print(
+                f"[bold red]Unknown migration {migration_type!r} for {framework}.[/bold red] "
+                f"Supported: {supported}"
+            )
+            sys.exit(1)
+
+    return framework, migration_type
+
+
+def _run_agent(
+    project_path: str,
+    framework: str,
+    migration_type: str,
+    dry_run: bool,
+    max_retries: int,
+    output_dir: str = "reports",
+) -> dict:
     """Scan the project, build a file queue, and run the LangGraph agent."""
     from automigrate.agent.graph import create_agent_graph
     from automigrate.agent.state import FileTask
 
     abs_path = str(Path(project_path).resolve())
 
-    console.print(f"[bold cyan]Scanning[/bold cyan] {abs_path} for [bold]{migration_type}[/bold] targets…")
-    scan_result = scan_project(abs_path, migration_type)
+    console.print(
+        f"[bold cyan]Scanning[/bold cyan] {abs_path} "
+        f"([bold]{framework}[/bold] / [bold]{migration_type}[/bold])…"
+    )
+    scan_result = scan_project(abs_path, migration_type=migration_type, framework=framework)
 
     if not scan_result.results:
-        console.print("[bold green]No migration targets found.[/bold green] Your project is already up to date!")
+        console.print(
+            "[bold green]No migration targets found.[/bold green] "
+            "Your project is already up to date!"
+        )
         sys.exit(0)
 
     # Deduplicate: one FileTask per unique file path
-    # and determine the aggregate strategy/complexity for the file.
     seen: dict[str, FileTask] = {}
     for r in scan_result.results:
         if r.file_path not in seen:
@@ -65,16 +125,15 @@ def _run_agent(project_path: str, migration_type: str, dry_run: bool, max_retrie
                 strategy="deterministic",
                 complexity="simple",
             )
-        
+
         task = seen[r.file_path]
         if r.classification == "ambiguous":
             task.strategy = "ambiguous"
-            
         if r.complexity == "complex":
             task.complexity = "complex"
         elif r.complexity == "medium" and task.complexity == "simple":
             task.complexity = "medium"
-            
+
     file_queue = list(seen.values())
 
     run_id = _build_run_id()
@@ -86,6 +145,7 @@ def _run_agent(project_path: str, migration_type: str, dry_run: bool, max_retrie
 
     initial_state = {
         "project_path": abs_path,
+        "framework": framework,
         "migration_type": migration_type,
         "dry_run": dry_run,
         "max_retries": max_retries,
@@ -107,10 +167,9 @@ def _run_agent(project_path: str, migration_type: str, dry_run: bool, max_retrie
     }
 
     graph = create_agent_graph()
-    
-    # Run the graph and stream events to show a progress bar
+
     from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
-    
+
     final_state = initial_state.copy()
     with Progress(
         SpinnerColumn(),
@@ -120,26 +179,21 @@ def _run_agent(project_path: str, migration_type: str, dry_run: bool, max_retrie
         console=console,
     ) as progress:
         task_id = progress.add_task("[cyan]Processing files...", total=len(file_queue))
-        
-        # Stream yields the output of each node as it finishes
+
         for step in graph.stream(initial_state):
             node_name = list(step.keys())[0]
             node_output = step[node_name]
-            
-            # Update local final state (simplified, doesn't run reducers perfectly but ok for summary)
-            # A better way in langgraph is to just use the state from the stream if we configure it properly,
-            # or rely on the final node's output. Actually, report_generator outputs the report.
+
             if "report" in node_output:
                 final_state["report"] = node_output["report"]
             if "confidence_scores" in node_output:
-                final_state.setdefault("confidence_scores", {}).update(node_output["confidence_scores"])
-                
+                final_state.setdefault("confidence_scores", {}).update(
+                    node_output["confidence_scores"]
+                )
+
             if node_name in ("confidence_calc", "record_dry_run"):
                 progress.advance(task_id)
 
-    # To get the true final state with all reducers applied, we would normally use graph.invoke
-    # But since we streamed, we'll return our patched final_state which has what we need for the summary.
-    # In a full app, we would use the LangGraph StateSaver checkpointer to get the exact final state.
     final_state["run_id"] = run_id
     final_state["output_dir"] = output_dir
     return final_state
@@ -163,7 +217,9 @@ def _print_summary(final_state: dict) -> None:
 
         console.print(
             Panel(
-                f"[bold green]AutoMigrate run complete:[/bold green] {run_id}\n"
+                f"[bold green]Reforge run complete:[/bold green] {run_id}\n"
+                f"  Framework: [bold]{final_state.get('framework', 'unknown')}[/bold] / "
+                f"{final_state.get('migration_type', 'unknown')}\n"
                 f"  {total}  files processed\n"
                 f"  [bold green]{completed}[/bold green]  auto-approved   "
                 f"(avg confidence {avg_conf:.0f})\n"
@@ -183,18 +239,75 @@ def _print_summary(final_state: dict) -> None:
 # ---------------------------------------------------------------------------
 
 @click.group()
-@click.version_option(version="0.1.0")
+@click.version_option(version="0.2.0")
 def main():
-    """AutoMigrate — Agentic Framework Migration & Validation System."""
+    """Reforge — Universal Agentic Framework Migration System.
+
+    Automatically detects your framework and applies AI-powered migrations.
+    """
     pass
 
 
-@main.command()
-def ingest():
-    """Ingest migration documentation for Context Stuffing."""
-    from automigrate.rag.ingest import ingest_docs
-    ingest_docs()
+# ---------------------------------------------------------------------------
+# list-frameworks
+# ---------------------------------------------------------------------------
 
+@main.command("list-frameworks")
+def list_frameworks():
+    """Show all supported frameworks and their available migrations."""
+    from automigrate.adapters.registry import list_adapters
+
+    table = Table(title="Supported Frameworks & Migrations", show_lines=True)
+    table.add_column("Framework", style="bold cyan")
+    table.add_column("Migration ID", style="magenta")
+    table.add_column("Display Name")
+    table.add_column("Description")
+    table.add_column("Default", justify="center")
+
+    for adapter_cls in list_adapters():
+        adapter = adapter_cls()
+        for migration in adapter.get_migrations():
+            table.add_row(
+                adapter.display_name,
+                migration.id,
+                migration.display_name,
+                migration.description,
+                "✓" if migration.default else "",
+            )
+
+    console.print(table)
+    console.print(
+        "\n[dim]Usage: automigrate migrate ./my-project "
+        "--framework <framework> --migration <migration-id>[/dim]"
+    )
+
+
+# ---------------------------------------------------------------------------
+# ingest
+# ---------------------------------------------------------------------------
+
+@main.command()
+@click.option("--framework", "-f", default=None, help="Framework to ingest docs for (all if omitted).")
+def ingest(framework: str | None):
+    """Ingest migration documentation for RAG context (for debugging/inspection)."""
+    from automigrate.adapters.registry import list_adapters, get_adapter
+
+    adapters = list_adapters()
+    if framework:
+        try:
+            adapters = [type(get_adapter(framework))]
+        except ValueError as e:
+            console.print(f"[bold red]{e}[/bold red]")
+            sys.exit(1)
+
+    for adapter_cls in adapters:
+        adapter = adapter_cls()
+        console.print(f"[bold]{adapter.display_name}[/bold]")
+        for migration in adapter.get_migrations():
+            docs = adapter.get_migration_docs(migration.id)
+            console.print(f"  {migration.id}: {len(docs)} chars of docs loaded")
+
+    console.print("[bold green]Done.[/bold green] Docs are bundled with each adapter.")
 
 
 # ---------------------------------------------------------------------------
@@ -203,18 +316,24 @@ def ingest():
 
 @main.command()
 @click.argument("project_path", type=click.Path(exists=True))
-@click.option("--framework", "-f", default="angular", show_default=True,
-              help="Target framework (currently: angular).")
-@click.option("--migration", "-m", default="control-flow", show_default=True,
-              help="Migration type slug (maps to angular_control_flow, etc.).")
+@click.option("--framework", "-f", default=None,
+              help="Framework to migrate (auto-detected if not specified).")
+@click.option("--migration", "-m", default=None,
+              help="Migration type (default for framework if not specified).")
 @click.option("--max-retries", default=3, show_default=True,
               help="Number of retry attempts per file before escalating.")
 @click.option("--output-dir", default="reports", show_default=True,
               help="Directory to save reports to.")
-def migrate(project_path: str, framework: str, migration: str, max_retries: int, output_dir: str):
+def migrate(project_path: str, framework: str | None, migration: str | None,
+            max_retries: int, output_dir: str):
     """Run the full migration pipeline (scan → transform → verify → test → report)."""
-    migration_type = f"{framework}_{migration.replace('-', '_')}"
-    final_state = _run_agent(project_path, migration_type, dry_run=False, max_retries=max_retries, output_dir=output_dir)
+    resolved_framework, migration_type = _resolve_framework_and_migration(
+        project_path, framework, migration
+    )
+    final_state = _run_agent(
+        project_path, resolved_framework, migration_type,
+        dry_run=False, max_retries=max_retries, output_dir=output_dir,
+    )
     _print_summary(final_state)
 
 
@@ -224,31 +343,37 @@ def migrate(project_path: str, framework: str, migration: str, max_retries: int,
 
 @main.command("dry-run")
 @click.argument("project_path", type=click.Path(exists=True))
-@click.option("--framework", "-f", default="angular", show_default=True,
-              help="Target framework.")
-@click.option("--migration", "-m", default="control-flow", show_default=True,
-              help="Migration type slug.")
+@click.option("--framework", "-f", default=None, help="Framework (auto-detected if not specified).")
+@click.option("--migration", "-m", default=None, help="Migration type slug.")
 @click.option("--output-dir", default="reports", show_default=True,
               help="Directory to save reports to.")
-def dry_run(project_path: str, framework: str, migration: str, output_dir: str):
+def dry_run(project_path: str, framework: str | None, migration: str | None, output_dir: str):
     """Plan-only run: show what would change without modifying any files."""
-    migration_type = f"{framework}_{migration.replace('-', '_')}"
-    final_state = _run_agent(project_path, migration_type, dry_run=True, max_retries=0, output_dir=output_dir)
+    resolved_framework, migration_type = _resolve_framework_and_migration(
+        project_path, framework, migration
+    )
+    final_state = _run_agent(
+        project_path, resolved_framework, migration_type,
+        dry_run=True, max_retries=0, output_dir=output_dir,
+    )
     _print_summary(final_state)
 
 
 # ---------------------------------------------------------------------------
-# scan (fine-grained inspection)
+# scan
 # ---------------------------------------------------------------------------
 
 @main.command()
 @click.argument("project_path", type=click.Path(exists=True))
-@click.option("--migration-type", "-m", default="angular_control_flow", show_default=True,
-              help="Migration type to scan for.")
+@click.option("--framework", "-f", default=None, help="Framework (auto-detected if not specified).")
+@click.option("--migration", "-m", default=None, help="Migration type slug.")
 @click.option("--json-output", "-j", is_flag=True, help="Output raw JSON instead of table.")
-def scan(project_path: str, migration_type: str, json_output: bool):
+def scan(project_path: str, framework: str | None, migration: str | None, json_output: bool):
     """Scan a project for migration targets (classification only, no transforms)."""
-    result = scan_project(project_path, migration_type)
+    resolved_framework, migration_type = _resolve_framework_and_migration(
+        project_path, framework, migration
+    )
+    result = scan_project(project_path, migration_type=migration_type, framework=resolved_framework)
 
     if json_output:
         click.echo(json.dumps(result.to_dict(), indent=2))
@@ -257,6 +382,7 @@ def scan(project_path: str, migration_type: str, json_output: bool):
     console.print(
         Panel(
             f"[bold]Project:[/bold] {result.project_path}\n"
+            f"[bold]Framework:[/bold] {result.framework}\n"
             f"[bold]Migration:[/bold] {result.migration_type}\n"
             f"[bold]Files scanned:[/bold] {result.total_files_scanned}\n"
             f"[bold]Patterns found:[/bold] {result.total_patterns_found}\n"
@@ -291,7 +417,7 @@ def scan(project_path: str, migration_type: str, json_output: bool):
 
 
 # ---------------------------------------------------------------------------
-# transform (single-file fine-grained control)
+# transform (single-file, Angular-specific fine-grained control)
 # ---------------------------------------------------------------------------
 
 @main.command()
@@ -300,7 +426,7 @@ def scan(project_path: str, migration_type: str, json_output: bool):
 @click.option("--write", "-w", is_flag=True, help="Write changes back to the file.")
 @click.option("--diff-only", "-d", is_flag=True, help="Show only the diff.")
 def transform(file_path: str, pattern: str | None, write: bool, diff_only: bool):
-    """Apply deterministic transforms to a single file."""
+    """Apply deterministic transforms to a single file (Angular control-flow)."""
     result = apply_ast_transform(file_path, pattern_id=pattern, write=write)
 
     if not result.success:
@@ -333,7 +459,7 @@ def transform(file_path: str, pattern: str | None, write: bool, diff_only: bool)
 
 
 # ---------------------------------------------------------------------------
-# report (re-render a past run)
+# report
 # ---------------------------------------------------------------------------
 
 @main.command()
@@ -356,7 +482,11 @@ def report(run_dir: str):
     table.add_column("Status", style="bold")
 
     for f in data.get("files", []):
-        status = "[green]✅ Approved[/green]" if not f.get("human_review_required") else "[yellow]⚠️  Review[/yellow]"
+        status = (
+            "[green]✅ Approved[/green]"
+            if not f.get("human_review_required")
+            else "[yellow]⚠️  Review[/yellow]"
+        )
         table.add_row(
             f["file"], f["strategy"],
             str(f["confidence_score"]),
@@ -367,6 +497,8 @@ def report(run_dir: str):
     console.print(table)
     console.print(
         Panel(
+            f"[bold]Framework:[/bold] {data.get('framework', 'n/a')}\n"
+            f"[bold]Migration:[/bold] {data.get('migration_type', 'n/a')}\n"
             f"[bold]Total:[/bold] {summary.get('total_files', 0)}\n"
             f"[bold green]Auto-approved:[/bold green] {summary.get('auto_approved', 0)}\n"
             f"[bold yellow]Flagged:[/bold yellow] {summary.get('flagged_for_review', 0)}\n"
@@ -402,4 +534,3 @@ def rollback(project_path: str):
 
 if __name__ == "__main__":
     main()
-

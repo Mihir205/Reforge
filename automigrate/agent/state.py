@@ -74,10 +74,11 @@ def reduce_dict(left: dict | None, right: dict | None) -> dict:
 
 class MigrationState(TypedDict):
     """The overall LangGraph state for a migration run."""
-    
+
     # Run configuration
     project_path: str
-    migration_type: str
+    framework: str        # e.g. "angular", "react", "vue" — used to look up the adapter
+    migration_type: str   # e.g. "control_flow", "class_to_hooks"
     dry_run: bool
     max_retries: int
     run_id: str  # Unique per-run ID, e.g. "run_2026_08_24_2209"

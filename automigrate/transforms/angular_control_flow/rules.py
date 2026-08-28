@@ -19,22 +19,19 @@ the regex approach handles the documented syntax patterns while the LLM fallback
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable
 
-
-class PatternComplexity(str, Enum):
-    """How complex a matched pattern is — affects confidence scoring."""
-
-    SIMPLE = "simple"
-    MEDIUM = "medium"
-    COMPLEX = "complex"
-    AMBIGUOUS = "ambiguous"  # needs LLM fallback
+# Re-export the generic base classes so existing imports keep working.
+from automigrate.transforms.base_rules import (  # noqa: F401
+    PatternComplexity,
+    RuleRegistry,
+    TransformRule,
+)
 
 
 class PatternId(str, Enum):
-    """Unique identifiers for each supported transform pattern."""
+    """Unique identifiers for each supported Angular transform pattern."""
 
     NGIF_SIMPLE = "ngif_simple"
     NGIF_ELSE = "ngif_else"
@@ -44,27 +41,6 @@ class PatternId(str, Enum):
     NGFOR_LOCALS = "ngfor_locals"
     NGSWITCH = "ngswitch"
     NGIF_ASYNC_PIPE = "ngif_async_pipe"  # ambiguous
-
-
-@dataclass
-class TransformRule:
-    """A single deterministic transform rule."""
-
-    id: PatternId
-    description: str
-    complexity: PatternComplexity
-    # Regex pattern to detect this directive in an HTML template.
-    # Must compile with re.DOTALL | re.MULTILINE.
-    detect_pattern: str
-    # Transform function: takes (match, full_template) -> replacement string.
-    # If None, this pattern is classified as ambiguous and deferred to LLM.
-    transform_fn: Callable[[re.Match, str], str] | None = None
-    # Compiled regex (populated by RuleRegistry).
-    _compiled: re.Pattern | None = field(default=None, repr=False)
-
-    @property
-    def is_deterministic(self) -> bool:
-        return self.transform_fn is not None
 
 
 # =============================================================================
@@ -450,64 +426,5 @@ for rule in _RULES:
         break
 
 
-# =============================================================================
-#  Rule Registry
-# =============================================================================
-
-
-class RuleRegistry:
-    """Registry of all transform rules, compiled and ready for matching."""
-
-    def __init__(self, rules: list[TransformRule] | None = None):
-        self.rules = rules or list(_RULES)
-        self._compile_all()
-
-    def _compile_all(self) -> None:
-        for rule in self.rules:
-            rule._compiled = re.compile(rule.detect_pattern, re.DOTALL)
-
-    def find_matches(self, template: str) -> list[tuple[TransformRule, re.Match]]:
-        """Find all directive matches in a template, ordered by position."""
-        matches: list[tuple[TransformRule, re.Match]] = []
-        for rule in self.rules:
-            assert rule._compiled is not None
-            for m in rule._compiled.finditer(template):
-                matches.append((rule, m))
-        # Sort by start position (outermost first for nested handling)
-        matches.sort(key=lambda x: x[1].start())
-        return matches
-
-    def classify(
-        self, template: str
-    ) -> list[dict]:
-        """Classify all matches in a template.
-
-        Returns a list of dicts with keys: pattern_id, classification,
-        complexity, line, column, snippet.
-        """
-        results = []
-        for rule, m in self.find_matches(template):
-            line = template[: m.start()].count("\n") + 1
-            col = m.start() - template.rfind("\n", 0, m.start())
-            results.append(
-                {
-                    "pattern_id": rule.id.value,
-                    "classification": "deterministic" if rule.is_deterministic else "ambiguous",
-                    "complexity": rule.complexity.value,
-                    "line": line,
-                    "column": col,
-                    "snippet": m.group(0)[:120],
-                }
-            )
-        return results
-
-    def get_rule(self, pattern_id: PatternId) -> TransformRule | None:
-        """Look up a rule by its ID."""
-        for rule in self.rules:
-            if rule.id == pattern_id:
-                return rule
-        return None
-
-
-# Module-level singleton for convenience
-registry = RuleRegistry()
+# Module-level singleton used by the Angular adapter (and legacy imports).
+registry = RuleRegistry(rules=list(_RULES))

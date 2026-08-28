@@ -1,77 +1,81 @@
 """
 Static Validation Tool.
 
-Runs static checks on a transformed file: AST parse, Type Check, and Lint.
-For Angular, we simulate these checks.
+Runs static checks on a transformed file using validators provided by the
+active FrameworkAdapter. Falls back to a generic syntax check if the adapter
+provides no validators.
 """
 
 from __future__ import annotations
 
-import os
-import subprocess
 from pathlib import Path
 
 from automigrate.agent.state import ValidationResult
 
 
-def run_static_validation(file_path: str, project_path: str) -> dict[str, ValidationResult]:
-    """Run static validation pipeline on a file.
-    
-    In a real implementation, this would invoke `tsc` and `eslint`.
-    For this project, we will simulate or use lightweight checks.
-    """
-    results = {}
-    
-    # 1. AST/Syntax Check (Simulated: check if it parses as valid HTML with new syntax)
-    # We could use an HTML parser here, but for now we'll just check for obvious bad tags
-    content = Path(project_path, file_path).read_text(encoding="utf-8")
-    
-    ast_passed = "<!-- WARNING:" not in content
-    results["AST"] = ValidationResult(
-        passed=ast_passed,
-        stage="AST",
-        errors=["Orphaned ng-template reference found"] if not ast_passed else []
-    )
-    
-    if not ast_passed:
-        return results
+def run_static_validation(
+    file_path: str,
+    project_path: str,
+    framework: str = "angular",
+    migration_type: str = "control_flow",
+) -> dict[str, ValidationResult]:
+    """Run static validation pipeline on a transformed file.
 
-    # 2. Type Check (Run `tsc --noEmit` if tsconfig.json exists)
-    tsconfig = Path(project_path) / "tsconfig.json"
-    if tsconfig.exists():
+    Loads validators from the framework adapter. The adapter decides what
+    checks are appropriate (tsc, eslint, ruff, pyright, etc.).
+
+    Args:
+        file_path:      Path to the file, relative to project_path.
+        project_path:   Absolute path to the project root.
+        framework:      Framework name (used to load the adapter).
+        migration_type: Migration type (passed to adapter.get_static_validators).
+
+    Returns:
+        Dict mapping stage name → ValidationResult.
+    """
+    results: dict[str, ValidationResult] = {}
+
+    # ── Generic AST-level check ───────────────────────────────────────────────
+    # Read the file and do a framework-agnostic pre-check for obvious errors.
+    try:
+        content = Path(project_path, file_path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        return {
+            "AST": ValidationResult(passed=False, stage="AST", errors=[str(e)])
+        }
+
+    # Generic heuristic: warn if there are orphaned comment markers from transforms
+    ast_errors = []
+    if "<!-- WARNING:" in content:
+        ast_errors.append("Orphaned ng-template reference found in output")
+
+    results["AST"] = ValidationResult(
+        passed=len(ast_errors) == 0,
+        stage="AST",
+        errors=ast_errors,
+    )
+
+    if ast_errors:
+        return results  # Don't bother running further validators on bad output
+
+    # ── Framework-specific validators from adapter ────────────────────────────
+    try:
+        from automigrate.adapters.registry import get_adapter
+        adapter = get_adapter(framework)
+        validators = adapter.get_static_validators(migration_type)
+    except Exception:
+        validators = []
+
+    for validator_fn in validators:
         try:
-            res = subprocess.run(
-                ["npx", "tsc", "--noEmit"], 
-                cwd=project_path, 
-                capture_output=True, 
-                text=True, 
-                timeout=60
-            )
-            passed = res.returncode == 0
-            errs = [res.stdout + "\n" + res.stderr] if not passed else []
-            results["TypeCheck"] = ValidationResult(passed=passed, stage="TypeCheck", errors=errs)
+            result = validator_fn(file_path, content, project_path)
+            results[result.stage] = result
+            if not result.passed:
+                break  # Stop on first hard failure
         except Exception as e:
-            results["TypeCheck"] = ValidationResult(passed=False, stage="TypeCheck", errors=[str(e)])
-    else:
-        results["TypeCheck"] = ValidationResult(passed=True, stage="TypeCheck", errors=["[SKIPPED] No tsconfig.json found"])
-    
-    # 3. Lint (Run `eslint` if eslintrc exists)
-    eslint_config = Path(project_path) / ".eslintrc.json"
-    if eslint_config.exists():
-        try:
-            res = subprocess.run(
-                ["npx", "eslint", file_path], 
-                cwd=project_path, 
-                capture_output=True, 
-                text=True, 
-                timeout=60
+            results["Validator"] = ValidationResult(
+                passed=False, stage="Validator", errors=[str(e)]
             )
-            passed = res.returncode == 0
-            errs = [res.stdout + "\n" + res.stderr] if not passed else []
-            results["Lint"] = ValidationResult(passed=passed, stage="Lint", errors=errs)
-        except Exception as e:
-            results["Lint"] = ValidationResult(passed=False, stage="Lint", errors=[str(e)])
-    else:
-        results["Lint"] = ValidationResult(passed=True, stage="Lint", errors=["[SKIPPED] No eslint config found"])
-    
+            break
+
     return results

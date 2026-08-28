@@ -49,7 +49,13 @@ def _classify_failure(
     return "unknown"
 
 
-def _build_failure_context(category: FailureCategory, val_errors: list[str], test_logs: str) -> str:
+def _build_failure_context(
+    category: FailureCategory,
+    val_errors: list[str],
+    test_logs: str,
+    framework: str,
+    migration_type: str,
+) -> str:
     """Build a targeted natural-language description of the failure for the retry prompt."""
     lines = [f"Previous attempt failed with category: {category}."]
 
@@ -62,29 +68,17 @@ def _build_failure_context(category: FailureCategory, val_errors: list[str], tes
         lines.append("Test failure output:")
         lines.extend(f"  {l}" for l in last_lines)
 
-    category_hints: dict[str, str] = {
-        "syntax_failure": (
-            "Ensure all @if / @for / @switch blocks have matching opening and closing braces. "
-            "Do not leave any *ngIf, *ngFor, or *ngSwitch attributes in the output."
-        ),
-        "type_error": (
-            "Check that all variable bindings reference properties that exist on the component class. "
-            "Prefer using the `as` alias pattern inside @if to ensure type narrowing."
-        ),
-        "lint_error": (
-            "Ensure consistent indentation (2 spaces), no trailing whitespace, and no unused template variables."
-        ),
-        "secrets_detected": (
-            "STOP. Do not include any API keys, passwords, tokens, or placeholder credentials in the output. "
-            "Never reproduce secrets from context files."
-        ),
-        "test_failure": (
-            "The transformed template broke at least one behavioral test. "
-            "Carefully preserve all existing data bindings, event handlers, and template variables."
-        ),
-        "unknown": "Review the full template carefully and ensure the migration is complete and correct.",
-    }
-    hint = category_hints.get(category, category_hints["unknown"])
+    # Load framework-specific hints from the adapter
+    try:
+        from automigrate.adapters.registry import get_adapter
+        adapter = get_adapter(framework)
+        category_hints = adapter.get_failure_hints(migration_type)
+    except Exception:
+        category_hints = {
+            "unknown": "Review the full file carefully and ensure the migration is complete.",
+        }
+
+    hint = category_hints.get(category, category_hints.get("unknown", "Review carefully."))
     lines.append(f"Correction guidance: {hint}")
     return "\n".join(lines)
 
@@ -150,7 +144,13 @@ def planner_node(state: MigrationState) -> dict:
         test_result = state.get("test_results", {}).get(current_file.file_path)
         test_logs = test_result.logs if test_result else ""
 
-        failure_ctx = _build_failure_context(category, val_errors, test_logs)
+        failure_ctx = _build_failure_context(
+            category,
+            val_errors,
+            test_logs,
+            framework=state.get("framework", "angular"),
+            migration_type=state.get("migration_type", "control_flow"),
+        )
         logger.info(
             "Retry %d/%d for %s — category: %s",
             file_retries, max_retries, current_file.file_path, category,

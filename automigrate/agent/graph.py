@@ -43,9 +43,14 @@ def validate_node(state: MigrationState) -> dict:
     current_file = state.get("current_file")
     if not current_file:
         return {}
-        
-    results = run_static_validation(current_file.file_path, state["project_path"])
-    return {"validation_results": {current_file.file_path: list(results.values())[-1]}}  # Simplified
+
+    results = run_static_validation(
+        current_file.file_path,
+        state["project_path"],
+        framework=state.get("framework", "angular"),
+        migration_type=state.get("migration_type", "control_flow"),
+    )
+    return {"validation_results": {current_file.file_path: list(results.values())[-1]}}
 
 
 def run_tests_node(state: MigrationState) -> dict:
@@ -53,8 +58,12 @@ def run_tests_node(state: MigrationState) -> dict:
     current_file = state.get("current_file")
     if not current_file:
         return {}
-        
-    result = run_test_suite(state["project_path"], current_file.file_path)
+
+    result = run_test_suite(
+        state["project_path"],
+        current_file.file_path,
+        framework=state.get("framework", "angular"),
+    )
     return {"test_results": {current_file.file_path: result}}
 
 
