@@ -1,451 +1,481 @@
-# AutoMigrate — Agentic Framework Migration & Validation System
+# Reforge — Universal Agentic Framework Migration System
 
-> An autonomous, tool-using AI agent that migrates codebases across framework versions (e.g., Angular's Control Flow syntax), validates every change through a multi-stage verification pipeline, and escalates only what it isn't confident about — instead of a human doing it all by hand.
-
----
-
-## 1. Problem Statement
-
-Every major framework release introduces breaking or recommended syntax changes (Angular's `*ngIf`/`*ngFor` → `@if`/`@for`, React class components → hooks, Vue 2 → 3, etc.). Today, teams handle this by dedicating engineers to manually rewrite affected files, running the test suite by hand after each batch, and reviewing every diff regardless of how trivial or risky it is.
-
-This project automates that workflow end-to-end using an **agentic AI system**: a LangGraph-orchestrated agent that plans the migration, uses deterministic AST transforms where possible, falls back to an LLM (grounded via reranked RAG retrieval) for ambiguous cases, verifies its own output through static validation and secrets scanning, and only involves a human where the confidence signals say it should.
+> An autonomous, tool-using AI agent that detects your framework, fetches the right migration documentation, and migrates your codebase across framework versions — validating every change through a multi-stage verification pipeline and escalating only what it isn't confident about.
 
 ---
 
-## 2. Design Principles
+## What It Does
 
-- Prefer deterministic AST transformations whenever possible.
-- Invoke an LLM only for ambiguous or semantic cases.
-- Ground every LLM decision using retrieved, reranked documentation.
-- Validate every transformation before accepting it — structurally, behaviorally, and for security.
-- Escalate uncertain cases instead of guessing.
-- Keep humans in the loop only where they provide value.
-- Make every agent decision traceable and replayable.
-- The CLI is the user's entry point; MCP is the agent's internal tool interface. They are different layers, not competing designs.
+Every major framework release introduces breaking or recommended syntax changes — Angular's `*ngIf`/`*ngFor` → `@if`/`@for`, React class components → Hooks, Vue 2 → 3, Next.js Pages Router → App Router, and so on. Teams handle this by dedicating engineers to manually rewrite affected files, run tests after each batch, and review every diff regardless of how trivial or risky it is.
+
+**Reforge automates that workflow end-to-end:**
+
+1. **Detects** the framework automatically from project files (no config required)
+2. **Scans** the codebase and classifies every pattern as deterministic (rule-based) or ambiguous (needs LLM)
+3. **Transforms** deterministic patterns with fast, reliable regex/AST rules
+4. **Falls back to LLM** for ambiguous cases, grounded with bundled migration documentation
+5. **Validates** every change — AST syntax, type check, lint, secrets scan, then real test suite
+6. **Retries** failed transforms with targeted failure context so the LLM doesn't repeat the same mistake
+7. **Escalates** only what genuinely needs a human, with a markdown review ticket
+8. **Reports** every run with a machine-readable `report.json` and human-readable `report.md`
 
 ---
 
-## 3. Why This Isn't "Just a Codemod"
+## Why This Isn't "Just a Codemod"
 
-Deterministic AST transforms (via ast-grep, jscodeshift, ts-morph, or similar) are excellent at rule-based syntax rewrites but cannot reason about behavior-changing edge cases, decide which files need special handling, or judge whether a transform actually succeeded. This project treats AST transforms as **tools**, not the system itself — the intelligence lives in the agent that decides *when* to use them, *what* to do when they don't apply, and *whether* to trust the result.
+Codemods are excellent at rule-based syntax rewrites but cannot reason about behavior-changing edge cases, decide which files need special handling, or judge whether a transform actually succeeded. **Reforge treats codemods as tools, not the system** — the intelligence lives in the agent that decides *when* to use them, *what* to do when they don't apply, and *whether* to trust the result.
 
-| | Deterministic AST Transform Alone | AutoMigrate (This Project) |
+| Capability | Codemod Alone | Reforge |
+|---|:---:|:---:|
+| Executes deterministic syntax transforms | ✅ | ✅ |
+| Auto-detects framework from project files | ❌ | ✅ |
+| Handles ambiguous / semantic cases | ❌ | ✅ LLM fallback |
+| Grounds LLM in current migration docs | ❌ | ✅ bundled RAG docs |
+| Verifies output before testing | ❌ | ✅ Verification Agent |
+| Type-checks and lints the result | ❌ | ✅ tsc, eslint |
+| Scans for leaked credentials | ❌ | ✅ Secrets scan gate |
+| Validates via real project tests | ❌ | ✅ ng test / npm test |
+| Classifies failures and retries smart | ❌ | ✅ failure-aware retry |
+| Human review only where needed | ❌ | ✅ confidence-based routing |
+| Pluggable for any framework | ❌ | ✅ adapter plugin system |
+
+---
+
+## Current Status
+
+### ✅ Fully Built & Working
+
+#### Framework Adapter Plugin System
+The core architectural achievement. Every piece of framework-specific knowledge (file patterns, rules, docs, prompts, validators, test commands, failure hints) lives in a self-contained adapter. The agent pipeline itself is 100% framework-agnostic.
+
+```
+automigrate/adapters/
+├── base.py              ← FrameworkAdapter ABC (the plugin contract)
+├── registry.py          ← detect_framework(), get_adapter(), list_adapters()
+├── angular/
+│   ├── adapter.py       ← AngularAdapter — full implementation
+│   └── docs/
+│       ├── control_flow.md           ← bundled RAG docs
+│       └── standalone_components.md
+└── react/
+    ├── adapter.py       ← ReactAdapter — LLM-only path, ready to use
+    └── docs/
+        └── class_to_hooks.md         ← bundled RAG docs
+```
+
+**Adding a new framework = 2 steps:**
+1. Create `adapters/<framework>/adapter.py` implementing `FrameworkAdapter`
+2. Add it to `registry.py`'s `_load_adapters()` list
+
+#### Agent Pipeline (LangGraph)
+Full stateful agent graph with conditional routing, retry logic, and report generation:
+
+```
+Planner → [deterministic: AST transform] → Verification → Static Validation
+        → [ambiguous:    LLM transform]  →   (tsc/eslint) → Secrets Scan
+                                                         → Run Tests → Confidence Calc
+                                                         → [pass] → next file
+                                                         → [fail, retries left] → retry with failure context
+                                                         → [fail, budget exhausted] → Review Ticket
+                                                         → Report Generator
+```
+
+#### CLI
+```bash
+automigrate list-frameworks                              # show all adapters and migrations
+automigrate scan    ./my-project                        # auto-detect + classify
+automigrate dry-run ./my-project                        # plan without writing
+automigrate migrate ./my-project                        # full migration run
+automigrate migrate ./my-project --framework react      # explicit framework
+automigrate migrate ./my-project --framework angular --migration standalone_components
+automigrate transform ./file.html --diff-only           # single file, diff only
+automigrate report ./reports/run_2026_08_27_2133        # re-render a past run
+automigrate rollback ./my-project                       # restore from .bak files
+```
+
+#### Angular Adapter — Production Ready
+- **Migrations:** `control_flow` (default), `standalone_components`
+- **Detection:** package.json `@angular/core`, `angular.json`, `.angular/` dir, or HTML files containing `*ngIf`/`*ngFor` (works for bare fixture directories too)
+- **Deterministic rules:** `ngif_simple`, `ngif_else`, `ngif_then_else`, `ngfor_simple`, `ngfor_trackby`, `ngfor_locals`, `ngswitch`
+- **Ambiguous:** `ngif_async_pipe` → routes to LLM with bundled docs
+- **Validators:** tsc `--noEmit`, eslint
+- **Test command:** `ng test --watch=false` → `npm test` fallback
+
+#### React Adapter — Scaffold Ready
+- **Migrations:** `class_to_hooks` (default), `cra_to_vite`, `router_v5_to_v6`
+- **Detection:** `react` in package.json (excludes Angular projects)
+- **Rules:** empty registry (all patterns go through LLM) — deterministic rules to be added
+- **LLM path:** rich system prompt + few-shot examples for each migration type
+- **Bundled docs:** comprehensive React Hooks migration guide
+- **Test command:** auto-detected from package.json scripts
+
+#### RAG (Context Stuffing)
+Each adapter bundles its own migration documentation. The LLM transform node loads the right docs based on `framework + migration_type` from state — no vector DB setup required for the current doc sizes.
+
+#### Validation Pipeline
+- **Verification Agent:** rule-based checks for leftover legacy directives, unbalanced braces, orphaned `ng-template` refs
+- **Static Validation:** adapter-provided validators (tsc, eslint) via `get_static_validators()`
+- **Secrets Scan:** pattern-based credential detection (gating — failure blocks regardless of other scores)
+- **Test Runner:** adapter's `get_test_command()` with heuristic fallback
+
+#### Confidence Scoring
+Observable signals → numeric score → routing decision:
+
+| Signal | Points |
+|---|---:|
+| Deterministic AST transform used | +40 |
+| AST/syntax check passed | +10 |
+| Type check passed | +15 |
+| Lint passed | +10 |
+| Test suite passed | +20 |
+| Verification agent passed | +5 |
+
+- **≥ 90** → Auto-approved
+- **< 90** → Retry (up to `--max-retries`, default 3)
+- **Retries exhausted** → Review ticket + escalated
+
+#### Failure-Aware Retry
+Failures are classified (`syntax_failure`, `type_error`, `lint_error`, `test_failure`, `secrets_detected`, `unknown`) and the retry prompt is enriched with framework-specific correction hints from the adapter — so the LLM doesn't repeat the same mistake.
+
+#### Output
+```
+reports/run_2026_08_27_2133/
+├── report.json      ← canonical machine-readable (CI-gatable)
+├── report.md        ← human-readable rendering (derived, never separate)
+└── review/
+    └── REVIEW_<file>.md   ← one ticket per escalated file
+```
+
+#### Test Suite
+57 tests, all passing:
+```bash
+pytest tests/ -v   # ~4s
+```
+Covers: adapter registry, auto-detection, Angular/React adapter contracts, generic rule engine, agent routing, confidence calculator, report generation.
+
+---
+
+### 🔨 Partially Built / Known Gaps
+
+| Area | Status | Notes |
 |---|---|---|
-| Executes syntax transforms | Yes | Yes (via MCP tool) |
-| Handles ambiguous/semantic cases | No | Yes (LLM fallback node) |
-| Grounds decisions in current docs | No | Yes (RAG retrieval + reranking) |
-| Verifies output before testing | No | Yes (Verification Agent + Static Validation) |
-| Scans for leaked credentials | No | Yes (Secrets Scanning Gate) |
-| Validates output via real tests | No | Yes (test-runner node) |
-| Classifies failures and recovers | No | Yes (failure-aware retry) |
-| Human review only where needed | No (all-or-nothing) | Yes (confidence-based routing) |
-| Traceable/replayable decisions | No | Yes (tracing layer) |
-
-Note: the transform engine underneath (`apply_ast_transform`) is implementation-agnostic — ast-grep, jscodeshift, ts-morph, or a custom engine can sit behind it without changing the orchestration layer above.
+| React deterministic rules | Scaffold only | All React patterns currently go through LLM. Regex/jscodeshift rules for common patterns (setState → useState, componentDidMount → useEffect) not yet written |
+| Vue 3 adapter | Not started | Architecture is ready, just needs a new adapter |
+| Next.js adapter | Not started | Pages Router → App Router migration would be high-value |
+| Real vector RAG | Not wired | `retriever.py` exists and `chromadb`/`sentence-transformers` are in deps, but retrieval is context-stuffing only (full doc loaded). Chunking + embedding + reranking not active |
+| LangSmith tracing | Not wired | Infra is in deps (`langsmith`) but traces aren't emitted yet |
+| Parallel file processing | Not implemented | LangGraph `Send` fan-out for independent files is designed but not built |
+| GitHub Issue tickets | Not implemented | `create_review_ticket` writes markdown locally only |
+| `standalone_components` rules | Docs bundled only | No deterministic rules yet — all LLM |
 
 ---
 
-## 4. Tech Stack & Core Concepts
+## How It Works
 
-| Layer | Technology | Role |
-|---|---|---|
-| User Interface | **CLI** (Python console-script, `pip install`-able) | The human's entry point — the only thing a user runs directly |
-| Orchestration | **LangGraph** | Stateful agent graph — planning, looping, conditional routing, fan-out for parallel work |
-| Tool Interface | **MCP (Model Context Protocol) Server** | Exposes migration primitives as callable tools — consumed by the agent internally, not by the human |
-| Deterministic Transforms | ast-grep / jscodeshift / ts-morph | Rule-based AST rewriting, engine-agnostic |
-| LLM Reasoning | LangChain + LLM provider | Handles ambiguous transforms, generates fallback code |
-| Grounding | **RAG (retrieval-augmented generation)** | Retrieves current migration docs/release notes so the LLM isn't relying on stale training data |
-| Reranker | e.g. `BAAI/bge-reranker-v2-m3` | Re-ranks top-k retrieved chunks before prompt injection, mitigating "lost in the middle" |
-| Vector Store | Chroma / FAISS | Stores embedded migration guides, release notes, past reviewed fixes |
-| Static Validation | Compiler / type-checker / linter | Catches trivial failures before full test execution |
-| Verification Agent | Lightweight rule-based checker | Catches missing imports, incomplete transforms, deprecated APIs left in place |
-| Secrets Scanning | gitleaks / truffleHog | Catches accidentally introduced or reproduced credentials before commit |
-| Validation | Project's own test runner (Jest/Karma/etc.) | Confirms each transform didn't break behavior |
-| Tracing & Observability | **LangSmith** | Full run tracing and replay of agent state for debugging failed migrations |
-| RAG Evaluation | **Ragas** | Measures retrieval faithfulness and context relevance to catch silent RAG quality regressions |
-
----
-
-## 5. System Architecture: CLI vs. MCP Server
-
-A common point of confusion: **CLI and MCP are not two competing ways to expose this project — they are two different layers, serving two different consumers.**
-
-- **CLI = the human's entry point.** A developer installs the package and runs a command in their terminal. This is how *AutoMigrate's user* interacts with the system.
-- **MCP Server = the agent's internal tool-exposure layer.** MCP doesn't talk to humans — it talks to agents/LLM hosts. The LangGraph planner is the thing calling `scan_project`, `apply_ast_transform`, `run_test_suite`, etc. as MCP tools. A human never calls the MCP server directly.
+### System Architecture
 
 ```
-Human runs:  automigrate migrate ./my-project --framework angular --migration control-flow
-        |
-        v
-CLI boots the LangGraph agent
-        |
-        v
-Agent calls MCP tools internally
-(scan_project -> apply_ast_transform -> verification -> validation -> secrets scan -> tests)
-        |
-        v
-Agent produces report.json / report.md
-        |
-        v
-CLI prints console summary + writes files to disk
+Human runs: automigrate migrate ./my-project
+                        │
+                        ▼
+              CLI boots LangGraph agent
+                        │
+              ┌─────────▼──────────┐
+              │   Framework Detect  │  ← reads package.json, angular.json, etc.
+              │   (or --framework)  │
+              └─────────┬──────────┘
+                        │
+              ┌─────────▼──────────┐
+              │  FrameworkAdapter   │  ← provides rules, docs, prompts, validators
+              └─────────┬──────────┘
+                        │
+         ┌──────────────▼──────────────┐
+         │    LangGraph Agent Loop      │
+         │  planner → transform →       │
+         │  verify → validate → test    │
+         │  → confidence → retry/done   │
+         └──────────────┬──────────────┘
+                        │
+              ┌─────────▼──────────┐
+              │  report.json / .md  │
+              │  review tickets     │
+              └─────────────────────┘
 ```
 
-**Optional extension (Phase 5/6):** because the MCP server already exists internally, the entire agent can additionally be exposed as a *single* MCP tool (e.g. `run_migration(project_path, migration_type)`), letting other MCP-compatible agent hosts (Claude Code, Claude Desktop, etc.) invoke AutoMigrate as a tool inside *their* workflows. This is additive — it does not replace the CLI as the primary interface for a human user.
-
----
-
-## 6. Installation & CLI Usage
-
-AutoMigrate ships as a standard Python package with a console-script entry point — install and run like any other dev tool (`eslint`, `pytest`, `ng`).
-
-```bash
-pip install automigrate
-```
-
-**Run a full migration** (scan → transform → verify → validate → secrets scan → test → report, all in one command):
-
-```bash
-automigrate migrate ./my-project --framework angular --migration control-flow
-```
-
-**Other subcommands**, for finer-grained control when needed:
-
-```bash
-automigrate dry-run ./my-project --framework angular --migration control-flow   # plan only, no writes
-automigrate scan ./my-project --framework angular                                # classification only
-automigrate report ./reports/run_2026_08_22_0031                                  # re-render a past report
-```
-
-Everything from scanning to testing happens inside the single `migrate` command by default — the subcommands exist for users who want to inspect or control an individual stage, the same way `git status` and `git commit` are both valid without one requiring the other.
-
----
-
-## 7. Overall Project Workflow
-
-This is the core of the system. Everything else in the README supports this loop.
+### Agent Graph
 
 ```mermaid
 flowchart TD
-    A[Entry Point: CLI Command] --> B[Planner Node]
-    B --> C[scan_project]
-    C --> D{Transformation Strategy?}
-    D -->|Deterministic| E[apply_ast_transform]
-    D -->|Ambiguous| F[RAG Retriever]
-    F --> F2[Reranker]
-    F2 --> G[Top Reranked Context]
-    G --> H[LLM Transformation]
-    H --> I[Verification Agent]
-    E --> I
-    I --> J[AST Validation]
-    J --> K[Type Check]
-    K --> L[Lint]
-    L --> S1[Secrets Scan]
-    S1 --> M[Run Test Suite]
-    M --> N{Tests Pass?}
-    N -->|Yes| O[Confidence Calculator]
-    O --> P[Migration Report]
-    N -->|No| Q{Retry Budget Left?}
-    Q -->|Yes| R[Re-plan With Failure Context]
-    R --> B
-    Q -->|No| Tk[Create Review Ticket]
-    Tk --> P
+    A[CLI: automigrate migrate] --> B[Planner Node]
+    B --> C{File queue empty?}
+    C -->|Yes| R[Report Generator]
+    C -->|No| D{Strategy?}
+    D -->|deterministic| E[AST Transform]
+    D -->|ambiguous| F[LLM Transform\nAdapter docs injected]
+    D -->|dry run| G[Record Dry Run]
+    E --> H[Verification Agent]
+    F --> H
+    H --> I[Static Validation\ntsc / eslint / ruff]
+    I --> J[Secrets Scan]
+    J -->|passed| K[Run Test Suite]
+    J -->|failed| B
+    K --> L[Confidence Calc]
+    L -->|score ≥ 90| B
+    L -->|score < 90, retries left| M[Retry Requeue\nwith failure context]
+    M --> B
+    L -->|retries exhausted| N[Review Ticket]
+    N --> B
+    G --> B
+    R --> Z[END]
 ```
-
-> Every node in this graph emits trace events to LangSmith, so a failed run can be replayed step-by-step rather than debugged from logs alone. Every node in this graph is a call to an MCP tool — the CLI never calls these directly; only the LangGraph agent does.
-
-### Step-by-step narrative
-
-1. **Entry Point (CLI)** — The user runs `automigrate migrate` (or `dry-run`), which boots the LangGraph agent with a target project path and migration type.
-2. **Planner Node (LangGraph)** — The brain of the system. Maintains state: file queue, retry counts, confidence scores, dependency order, dry-run flag. Decides what happens next at every step.
-3. **`scan_project` (MCP tool)** — Walks the codebase, parses ASTs, and classifies each match as either a known deterministic pattern or an ambiguous case.
-4. **Deterministic path** — If a rule-based transform exists, `apply_ast_transform` runs it directly. No LLM call needed — fast, cheap, reliable.
-5. **Ambiguous path (RAG-grounded)** — If no fixed rule applies, the **RAG retriever** pulls candidate chunks from indexed migration guides, release notes, RFCs, and prior human-reviewed fixes. A **reranker** then re-scores those candidates so the most relevant context — not just the top-k by raw similarity — is what actually reaches the prompt.
-6. **LLM Transformation** — Generates the transform using the reranked context.
-7. **Verification Agent** — Before anything is treated as committable, a lightweight check catches obvious problems: malformed syntax, missing imports, incomplete transformations, deprecated APIs still present, inconsistent formatting, suspicious semantic changes.
-8. **Static Validation (AST → compile → type-check → lint)** — Only code that survives this stage proceeds further. This is what keeps the pipeline fast — most trivial failures are caught here instead of burning a full test run.
-9. **Secrets Scanning Gate** — Runs after static validation, before tests: catches credentials the LLM may have hallucinated as placeholders or copied from a fixture/context file.
-10. **`run_test_suite` (MCP tool)** — Full behavioral validation against the project's real tests.
-11. **Confidence Calculator** — Combines every validation signal into a single score (see Section 9).
-12. **Conditional routing** — Pass -> confidence-scored and reported. Fail -> failure is classified, and the planner re-plans with that specific failure context, up to a retry budget. Retries exhausted -> escalated to a human review ticket.
-13. **Loop** — The planner pulls the next file (respecting dependency order; independent files fan out in parallel via LangGraph's `Send` mechanism, see Section 12) and repeats until the queue is empty.
-14. **Final Report** — Written to disk and summarized on the CLI (see Section 10).
 
 ---
 
-## 8. Component Responsibility Matrix
+## Installation & Quick Start
 
-| Component | Type | Responsibility |
+```bash
+# Clone and install
+git clone https://github.com/Mihir205/Reforge.git
+cd Reforge
+pip install -e .
+
+# (Optional) Start Ollama for LLM transforms
+ollama pull qwen2.5-coder:7b
+ollama serve
+
+# Copy env template
+cp .env.example .env
+```
+
+```bash
+# See all supported frameworks and migrations
+automigrate list-frameworks
+
+# Auto-detect framework and scan (no writes)
+automigrate scan ./my-project
+
+# Full migration — framework auto-detected from package.json / angular.json / etc.
+automigrate migrate ./my-project
+
+# Explicit framework + migration type
+automigrate migrate ./my-project --framework angular --migration control_flow
+automigrate migrate ./my-react-app --framework react --migration class_to_hooks
+
+# Dry run — plan only, no file writes
+automigrate dry-run ./my-project
+
+# Re-render a past run's report
+automigrate report ./reports/run_2026_08_27_2133
+
+# Rollback (restores .bak files created during migration)
+automigrate rollback ./my-project
+```
+
+### Environment Variables
+
+| Variable | Default | Purpose |
 |---|---|---|
-| CLI | User interface | Parses commands, boots the agent, prints console summary, exits |
-| Planner Node | LangGraph node | Owns agent state, decides next action, tracks retries/confidence/dependency order/dry-run |
-| `scan_project` | MCP tool | AST parsing, pattern classification |
-| `apply_ast_transform` | MCP tool | Executes deterministic, engine-agnostic AST transforms |
-| RAG Retriever | LangChain retriever | Fetches candidate context for ambiguous cases |
-| Reranker | Cross-encoder model (e.g. bge-reranker-v2-m3) | Re-scores retrieved chunks for relevance before prompt injection |
-| Vector Store | Chroma/FAISS | Stores embedded docs/release notes/reviewed fixes |
-| LLM Transformation Node | LangGraph node | Generates transform for cases with no fixed rule |
-| Verification Agent | MCP tool / node | Catches obvious structural issues before validation |
-| Static Validation Pipeline | MCP tool | AST parse -> compile -> type-check -> lint |
-| Secrets Scanning Gate | MCP tool | Runs gitleaks/truffleHog before a transform is accepted |
-| `run_test_suite` | MCP tool | Runs existing tests, returns pass/fail + logs |
-| Confidence Calculator | LangGraph node | Aggregates validation signals into a single score |
-| `create_review_ticket` | MCP tool | Surfaces low-confidence/failed changes to a human |
-| Report Generator | LangGraph terminal node | Compiles final migration summary, writes to disk |
-| Tracing Layer (LangSmith) | Observability integration | Records and replays every node's inputs/outputs |
-| RAG Evaluator (Ragas) | Offline evaluation | Scores retrieval faithfulness and context relevance |
+| `OLLAMA_MODEL` | `qwen2.5-coder:7b` | LLM model for ambiguous transforms |
+| `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Ollama server URL |
+| `CONFIDENCE_AUTO_APPROVE_THRESHOLD` | `90.0` | Score above which transforms are auto-approved |
+| `CONFIDENCE_QUICK_REVIEW_THRESHOLD` | `70.0` | Score below which human review is flagged |
 
 ---
 
-## 9. Confidence Score Calculation
-
-Confidence is derived from observable validation signals rather than an arbitrary LLM self-reported probability.
-
-| Signal | Score |
-|---|---:|
-| Deterministic AST Transform used | +40 |
-| AST Validation Passed | +10 |
-| Type Check Passed | +15 |
-| Lint Passed | +10 |
-| Secrets Scan Passed | +0 (gating, not scored — a failure here blocks regardless of other signals) |
-| Test Suite Passed | +20 |
-| Verification Agent Passed | +5 |
-
-**Thresholds:**
-- **90–100** -> Auto-approved
-- **70–89** -> Recommended for quick human review
-- **Below 70** -> Human review required
-- **Secrets scan failure** -> Always routed to human review, irrespective of score
-
----
-
-## 10. Output Format & Access
-
-The output has two layers, and the distinction matters: **the CLI is the interface, disk is the record.**
-
-### 10.1 Live console output (during the run)
-
-The CLI prints progress as the agent works, and a final summary block when it finishes:
-
-```
-AutoMigrate run complete: run_2026_08_22_0031
-  12 files processed
-  9  auto-approved   (avg confidence 93)
-  3  flagged for review
-  Full report: reports/run_2026_08_22_0031/report.md
-  Trace: https://smith.langchain.com/.../run_2026_08_22_0031
-```
-
-This exists so the user gets an immediate "did it work, what do I do next" signal without having to open a file. It disappears once the terminal session ends — it is a view, not the record.
-
-### 10.2 Persistent disk output (after the run)
-
-Written to `reports/run_<id>/`, and this is what actually outlives the CLI session — readable by a human later, or by a CI pipeline that gates a merge on it:
-
-```
-reports/run_2026_08_22_0031/
-├── report.json      ← canonical, machine-readable record (source of truth)
-├── report.md          ← human-readable rendering of the same data
-└── logs/                ← raw tool outputs (test logs, lint output, etc.)
-```
-
-`report.json` is canonical — `report.md` is generated from it, not maintained separately, so the two can never drift out of sync. Rough shape:
-
-```json
-{
-  "run_id": "run_2026_08_22_0031",
-  "migration_type": "angular_control_flow",
-  "files": [
-    {
-      "file": "src/app/dashboard.component.html",
-      "strategy": "deterministic",
-      "confidence_score": 90,
-      "validation": {
-        "ast": "pass", "type_check": "pass", "lint": "pass",
-        "secrets_scan": "pass", "tests": "pass"
-      },
-      "retry_count": 0,
-      "failure_category": null,
-      "human_review_required": false,
-      "trace_url": "https://smith.langchain.com/.../run_2026_08_22_0031/f1"
-    }
-  ],
-  "summary": {
-    "total_files": 12,
-    "auto_approved": 9,
-    "flagged_for_review": 3,
-    "avg_confidence": 93,
-    "time_saved_estimate_hours": 6.0
-  }
-}
-```
-
-### 10.3 Review tickets
-
-`create_review_ticket` writes a markdown file per flagged file into `reports/run_<id>/review/` by default. As a stretch enhancement (Phase 5/6), this can instead open a real GitHub Issue via the GitHub API, carrying the file, confidence score, failure reason, and trace link — putting the human-in-the-loop step somewhere a reviewer would actually see it, rather than another file they have to remember to check.
-
-### 10.4 Why this format, not just a printed report
-
-- **JSON is canonical** because the confidence score, validation status, and review flag are meant to drive decisions (CI gating, ticket creation, skip-on-next-run) — not just be read by a person.
-- **Markdown is derived, not separate**, so there's a human-readable view without a second source of truth to keep in sync.
-- **Disk persistence** is required because the CLI process exits and the terminal scrollback disappears — the report has to outlive that session for CI or a later reviewer to use it.
-- **The trace link ties every reported file back to a replayable LangSmith run**, which is what actually lets you debug *why* the agent made a decision, not just *that* it made one.
-
----
-
-## 11. Failure-Aware Retry
-
-Retries are driven by failure classification rather than blindly re-invoking the LLM.
-
-**Failure categories:** Syntax Failure, Compilation Failure, Type Error, Lint Error, Secrets Detected, Test Failure, Runtime Failure
-
-The planner selects a recovery strategy based on the detected category — e.g., a type error triggers a different re-prompt than a failing test assertion, and a secrets-detected failure skips retry entirely and routes straight to human review. This keeps retries targeted instead of "try the whole thing again and hope."
-
----
-
-## 12. Dependency Analysis & Parallel Execution
-
-Before migration begins, the planner constructs a dependency graph across the target files.
-
-**Responsibilities:**
-- Detect files that depend on one another
-- Determine a safe migration order
-- Prevent cascading failures from out-of-order transforms
-- Group independent files for parallel execution using LangGraph's native fan-out (`Send`) pattern — dispatching independent files to parallel branches and aggregating results at a join node, without introducing a separate orchestration system
-
-> Scoped as a Phase 5+ extension — see Section 13.
-
----
-
-## 13. Dry Run Mode
-
-Executes the full planning and analysis pipeline without modifying the project (`automigrate dry-run`). Outputs: files that would change, planned transformation strategy per file, estimated migration complexity, predicted confidence, and an estimate of how many files will need human review.
-
-Because dry-run reuses the planner and scanning logic directly (just short-circuiting the write/execute step), it's introduced as soon as the planner exists rather than as a late-stage feature — see Phase 2 in Section 14. It's a low-cost, high-trust artifact: showing stakeholders exactly what *would* happen before anything actually changes.
-
----
-
-## 14. Development Phases
-
-### Phase 1 — Foundations
-- Define one target migration (e.g., Angular `*ngIf`/`*ngFor` → `@if`/`@for`)
-- Build the MCP server skeleton and expose `scan_project` + `apply_ast_transform` as tools
-- Build the CLI skeleton (`automigrate migrate`) that boots the agent
-- Get a deterministic-only pipeline working end-to-end on a small fixture project
-
-### Phase 2 — Agentic Orchestration + Dry Run
-- Design the LangGraph state schema (file queue, retry count, confidence, test results, failure category, dry-run flag)
-- Implement the planner node and conditional edges (pass/fail/retry/escalate)
-- Implement Dry Run Mode alongside the planner (`automigrate dry-run`, Section 13)
-- Wire in static validation (AST/compile/type-check/lint) and `run_test_suite`
-- Implement `report.json` writing and the CLI console summary (Section 10)
-
-### Phase 3 — RAG-Grounded Fallback + Reranking
-- Index official migration guides, release notes, RFCs, and past reviewed fixes into a vector store
-- Build the retriever, reranker, and LLM transformation node for cases with no deterministic rule
-- Add the Verification Agent and Secrets Scanning Gate as pre-acceptance checks
-- Confirm reranked retrieval measurably improves fallback transform correctness vs. a no-reranker baseline
-
-### Phase 4 — Confidence, Reporting, Observability & Human-in-the-Loop
-- Implement the confidence calculator (Section 9) and `create_review_ticket` (Section 10.3)
-- Build the failure-aware retry classifier (Section 11)
-- Integrate LangSmith tracing across all nodes and Ragas for RAG-quality evaluation
-- Generate `report.md` from `report.json`, including the LangSmith trace link
-
-### Phase 5 — Extensions (Stretch Goals)
-- Dependency analysis and LangGraph fan-out parallel execution (Section 12)
-- Rollback/checkpointing for repeatedly-failing files (Section 15)
-- GitHub Issue integration for review tickets
-- Expose the full agent as a single composable MCP tool for other agent hosts (Section 5)
-- Full evaluation metrics suite (Section 16)
-
-### Phase 6 — Demo & Polish
-- Curate a representative fixture repo with realistic edge cases
-- Record a live demo: `automigrate dry-run` preview -> `automigrate migrate` -> verification catches an issue -> test fails -> agent retries with failure context -> agent escalates a genuinely ambiguous case -> replay the run in LangSmith
-- Write up results: % auto-approved, % flagged, time saved vs. manual baseline
-
----
-
-## 15. Rollback
-
-Every transformation is checkpointed. If validation repeatedly fails for a file, the agent restores only that file rather than reverting the entire migration run.
-
-> Scoped as a Phase 5+ extension — see Section 14.
-
----
-
-## 16. Evaluation Metrics
-
-- Automatic Migration Rate
-- Human Review Rate
-- Validation Success Rate (static validation pass rate before tests)
-- Secrets Scan Trigger Rate
-- Retry Success Rate
-- Average Migration Time per File
-- False Confidence Rate (auto-approved files that later needed a fix)
-- Retrieval Quality (Ragas faithfulness / context relevance scores, pre- and post-reranker)
-- Time Saved Compared to Manual Migration
-
----
-
-## 17. Project Structure (Suggested)
+## Project Structure (Actual)
 
 ```
 automigrate/
-├── cli/
-│   ├── main.py                    # CLI entry point (console-script)
-│   └── commands/
-│       ├── migrate.py
-│       ├── dry_run.py
-│       ├── scan.py
-│       └── report.py
-├── mcp_server/
-│   ├── tools/
-│   │   ├── scan_project.py
-│   │   ├── apply_ast_transform.py
-│   │   ├── verification_agent.py
-│   │   ├── static_validation.py
-│   │   ├── secrets_scan.py
-│   │   ├── run_test_suite.py
-│   │   └── create_review_ticket.py
-│   └── server.py
+├── adapters/                        ← Framework plugin system
+│   ├── base.py                      ← FrameworkAdapter ABC
+│   ├── registry.py                  ← detect_framework(), get_adapter()
+│   ├── angular/
+│   │   ├── adapter.py               ← Full Angular adapter
+│   │   └── docs/
+│   │       ├── control_flow.md
+│   │       └── standalone_components.md
+│   └── react/
+│       ├── adapter.py               ← React adapter (LLM-only path)
+│       └── docs/
+│           └── class_to_hooks.md
 ├── agent/
-│   ├── graph.py                 # LangGraph state graph definition (incl. fan-out for parallel files)
-│   ├── state.py                  # Agent state schema
+│   ├── graph.py                     ← LangGraph state graph
+│   ├── state.py                     ← MigrationState TypedDict
 │   └── nodes/
-│       ├── planner.py
-│       ├── llm_transform.py
-│       └── confidence_calculator.py
-├── rag/
-│   ├── ingest.py                  # Loads migration docs into vector store
-│   ├── retriever.py
-│   ├── reranker.py
-│   └── data/                       # Migration guides, release notes, RFCs
+│       ├── planner.py               ← Brain: queue management, retry classification
+│       ├── llm_transform.py         ← LLM node (framework-agnostic)
+│       ├── confidence_calculator.py ← Scoring
+│       └── report_generator.py      ← report.json + report.md writer
+├── mcp_server/
+│   ├── server.py                    ← MCP server (agent's internal tool interface)
+│   └── tools/
+│       ├── scan_project.py          ← Walks project, classifies patterns via adapter
+│       ├── apply_ast_transform.py   ← Deterministic transforms (engine-agnostic)
+│       ├── verification_agent.py    ← Rule-based post-transform checks
+│       ├── static_validation.py     ← Framework-aware tsc/eslint/ruff
+│       ├── secrets_scan.py          ← Credential detection gate
+│       ├── run_test_suite.py        ← Runs ng test / npm test / pytest
+│       └── create_review_ticket.py  ← Writes markdown review tickets
 ├── transforms/
-│   └── angular_control_flow/       # Deterministic transform rules (engine-agnostic)
-├── eval/
-│   ├── langsmith_config.py         # Tracing setup
-│   └── ragas_eval.py                # RAG quality evaluation
-├── fixtures/                       # Sample project(s) used for testing/demo
-├── reports/                        # Output migration summaries (report.json / report.md / logs)
-└── pyproject.toml                  # Packaging + console-script entry point
+│   ├── base_rules.py                ← Generic TransformRule, RuleRegistry (shared)
+│   └── angular_control_flow/
+│       └── rules.py                 ← Angular-specific regex transform rules
+├── rag/
+│   ├── retriever.py                 ← Framework-aware doc loader (adapter-backed)
+│   └── ingest.py                    ← Debug/inspection utility
+├── eval/                            ← LangSmith + Ragas (scaffolded, not wired)
+├── fixtures/
+│   └── angular-demo/               ← Test fixture with old *ngIf/*ngFor syntax
+├── reports/                         ← Migration run outputs
+├── tests/
+│   ├── test_adapter_registry.py     ← Adapter system (37 tests)
+│   ├── test_phase1.py               ← Angular rules + scan (14 tests)
+│   ├── test_phase2.py               ← Agent routing (2 tests)
+│   └── test_phase4.py               ← Confidence + report gen (2 tests)
+└── cli.py                           ← CLI entry point (console-script)
 ```
 
 ---
 
-## 18. Extensible Transformation Framework
+## Architecture Principle: CLI vs MCP
 
-The orchestration layer (planner, RAG grounding, verification, validation, confidence scoring, tracing) is designed to stay unchanged as new transformation plugins are added. Future plugins could target:
+A common point of confusion — **these are two different layers for two different consumers:**
 
-- Additional framework upgrades (React class → hooks, Vue 2 → 3)
-- Library migrations
-- API deprecation fixes
-- Security patches
-- Automated refactoring
-- Coding-standard enforcement
-- Legacy code modernization
+- **CLI = the human's entry point.** You run `automigrate migrate` in your terminal. This is the only interface a human ever touches.
+- **MCP Server = the agent's internal tool interface.** The LangGraph planner calls `scan_project`, `apply_ast_transform`, `run_test_suite` etc. as MCP tools internally. A human never calls the MCP server directly.
+
+This separation means the full agent can also be exposed as a single composable MCP tool for other AI hosts (Claude Code, Claude Desktop, etc.) — they just call `run_migration(project_path)` and the whole pipeline runs inside their workflow.
 
 ---
 
-## 19. Disclaimer
+## Future Improvements
 
-This project is a demonstration of agentic AI orchestration (LangGraph + MCP + RAG + reranking + tracing) applied to code migration, built for learning and portfolio purposes. It is scoped to one framework and one migration type for the core deliverable, with dependency analysis/parallel execution and rollback treated as stretch goals rather than core-path claims. It is not intended as a production replacement for enterprise migration tooling.
+### High Priority
+
+#### 1. Real Vector RAG with Reranking
+The current RAG implementation loads the full docs file into the prompt (context stuffing). For large doc sets or when adding many migrations this won't scale. The infra is already in `pyproject.toml`:
+- Chunk docs into segments → embed with `sentence-transformers`
+- Store in ChromaDB
+- Retrieve top-k by similarity → re-rank with `BAAI/bge-reranker-v2-m3`
+- Only inject the top-reranked chunks into the prompt
+
+**Impact:** Better LLM accuracy on ambiguous transforms, lower token cost, scales to large doc sets.
+
+#### 2. React Deterministic Rules
+The React adapter currently routes all patterns through the LLM. Common class-to-hooks patterns are mechanical enough for regex/AST rules:
+- `this.state = { x }` → `const [x, setX] = useState()`
+- `componentDidMount() {}` → `useEffect(() => {}, [])`
+- `this.setState({ x: val })` → `setX(val)`
+- `createRef()` → `useRef(null)`
+
+**Impact:** Faster, cheaper, more reliable transforms for simple React components.
+
+#### 3. Vue 3 Adapter
+Options API → Composition API is a high-demand migration with clear mechanical rules. The adapter system is ready — just needs:
+- Detection: `vue` in `package.json` + `.vue` files
+- Rules: `data()` → `ref()`/`reactive()`, `methods:` → plain functions, `computed:` → `computed()`, lifecycle hooks → Composition API equivalents
+- Bundled Vue 3 migration docs
+
+#### 4. Next.js Adapter
+Pages Router → App Router migration is one of the most requested and complex JS migrations:
+- `pages/` → `app/` directory structure
+- `getServerSideProps` → async Server Components
+- `getStaticProps` → `fetch()` with `cache: 'force-cache'`
+- Client component boundary (`'use client'`) detection
+
+#### 5. LangSmith Tracing
+`langsmith` is already in dependencies but traces aren't emitted. Wiring this up would give:
+- Full step-by-step replay of any failed migration run
+- Per-node latency and token usage
+- Easy debugging without reading raw logs
+
+### Medium Priority
+
+#### 6. Parallel File Processing (LangGraph Fan-out)
+Currently files are processed sequentially. LangGraph's `Send` mechanism allows independent files to be dispatched to parallel branches and results aggregated at a join node. No external orchestration needed — just a topology change in `graph.py`.
+
+**Impact:** Significant speed improvement for large projects.
+
+#### 7. GitHub / Jira Issue Integration for Review Tickets
+`create_review_ticket` currently writes markdown files locally. Connecting it to the GitHub Issues API (or Jira) would put the human-in-the-loop step somewhere reviewers actually look, with the diff, confidence score, and failure reason attached.
+
+#### 8. Evaluation Metrics Suite
+- Automatic Migration Rate (% files auto-approved)
+- Human Review Rate
+- Retry Success Rate
+- False Confidence Rate (auto-approved files that needed a later fix)
+- Retrieval Quality (Ragas faithfulness / context relevance, pre/post reranker)
+- Time Saved vs Manual Baseline
+
+#### 9. Python Adapter
+For Python codebase migrations:
+- `unittest` → `pytest`
+- Python 2 → 3 syntax
+- Flask → FastAPI
+- Django version upgrades
+- Detection: `requirements.txt` / `pyproject.toml`
+
+### Lower Priority
+
+#### 10. Dependency-Aware Migration Order
+Before migrating, build a dependency graph across target files so files are migrated in a safe order (dependencies before dependents). Prevents cascading failures from out-of-order transforms.
+
+#### 11. CI/CD Integration
+- GitHub Actions workflow that runs `automigrate dry-run` on PRs and comments the scan results
+- Gate merges on `automigrate report` output (e.g., fail if any files are escalated)
+
+#### 12. Web UI / Dashboard
+A simple dashboard to visualize migration runs — file-by-file confidence scores, diff viewer, review queue — instead of reading report.md files directly.
+
+#### 13. Incremental Migration
+Support for migrating only files changed since a given git commit (instead of the whole project each time). Useful for large codebases where you migrate incrementally per PR.
+
+---
+
+## Development Phases (Retrospective)
+
+### ✅ Phase 1 — Foundations
+- Angular `*ngIf`/`*ngFor`/`*ngSwitch` → `@if`/`@for`/`@switch` deterministic rules
+- MCP server with `scan_project`, `apply_ast_transform`, `verification_agent`, `static_validation`, `secrets_scan`, `run_test_suite`, `create_review_ticket`
+- CLI skeleton (`migrate`, `dry-run`, `scan`, `transform`, `report`, `rollback`)
+
+### ✅ Phase 2 — Agentic Orchestration
+- LangGraph state graph with full conditional routing
+- Planner node with queue management and dry-run mode
+- Retry budget + requeue logic
+- Confidence calculator + confidence-based routing
+
+### ✅ Phase 3 — LLM Fallback + RAG
+- LLM transformation node using Ollama (qwen2.5-coder)
+- Context-stuffing RAG (full doc → LLM prompt)
+- Verification agent + secrets scan gate
+- Failure-aware retry with targeted correction prompts
+
+### ✅ Phase 4 — Confidence, Reporting, Failure Classification
+- Confidence scoring (observable signals → numeric score)
+- `report.json` + `report.md` output
+- Per-file review tickets (`create_review_ticket`)
+- Failure classifier → targeted retry prompts per category
+
+### ✅ Phase 5 — Universal Framework Architecture
+- `FrameworkAdapter` abstract base class (plugin interface)
+- Adapter registry with auto-detection from project files
+- `AngularAdapter` — full implementation wrapping existing rules
+- `ReactAdapter` — scaffold with `class_to_hooks`, `cra_to_vite`, `router_v5_to_v6`
+- Framework-aware `scan_project`, `static_validation`, `run_test_suite`, `llm_transform`
+- CLI `list-frameworks` command
+- 4-signal Angular auto-detection (package.json, angular.json, .angular/, HTML directives)
+- 37 new adapter tests, 57 total passing
+
+### 🔜 Phase 6 — Improvements (In Progress)
+- Real vector RAG + reranking
+- React deterministic rules
+- Vue 3 / Next.js adapters
+- LangSmith tracing
+- Parallel file processing
+
+---
+
+## Disclaimer
+
+Reforge is a portfolio/learning project demonstrating agentic AI orchestration (LangGraph + MCP + RAG + plugin adapters) applied to code migration. The Angular control-flow migration is production-quality. The React adapter is a working scaffold. Vue/Next.js adapters are not yet implemented. Vector RAG, LangSmith tracing, and parallel execution are scaffolded but not active.
